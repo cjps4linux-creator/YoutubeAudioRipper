@@ -111,7 +111,8 @@ logger.addHandler(_file_handler)
 
 # ── Pre-flight checks ──────────────────────────────────────────────────
 def _check_ffmpeg() -> bool:
-    """Return True if ffmpeg is available on PATH, False otherwise."""
+    """Return True if ffmpeg is available on PATH or bundled next to the EXE."""
+    # 1. Check PATH first
     try:
         result = subprocess.run(
             ["ffmpeg", "-version"],
@@ -119,9 +120,45 @@ def _check_ffmpeg() -> bool:
             text=True,
             timeout=5,
         )
-        return result.returncode == 0
+        if result.returncode == 0:
+            return True
     except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
-        return False
+        pass
+
+    # 2. Check bundled ffmpeg.exe next to the executable (PyInstaller dist folder)
+    try:
+        exe_dir = Path(sys.executable).resolve().parent
+        bundled = exe_dir / "ffmpeg.exe"
+        if bundled.exists():
+            result = subprocess.run(
+                [str(bundled), "-version"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if result.returncode == 0:
+                return True
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        pass
+
+    # 3. Check _MEIPASS (PyInstaller onefile temp extraction dir)
+    try:
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            bundled = Path(meipass) / "ffmpeg.exe"
+            if bundled.exists():
+                result = subprocess.run(
+                    [str(bundled), "-version"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
+                if result.returncode == 0:
+                    return True
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        pass
+
+    return False
 
 
 def _check_yt_dlp() -> bool:
