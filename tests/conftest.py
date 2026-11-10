@@ -1,4 +1,4 @@
-"""Shared fixtures and safety hooks for the Youtube-Audio-Ripper test-suite.
+"""Shared fixtures and safety hooks for the Youtube Audio Ripper test-suite.
 
 Design constraints
 ------------------

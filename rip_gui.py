@@ -391,7 +391,7 @@ def check_for_updates() -> dict | None:
     try:
         req = urllib.request.Request(
             GITHUB_API_LATEST,
-            headers={"User-Agent": "Youtube-Audio-Ripper-updater"},
+            headers={"User-Agent": "Youtube Audio Ripper-updater"},
         )
         with urllib.request.urlopen(req, timeout=10) as resp:
             data = json.loads(resp.read().decode("utf-8"))
@@ -1171,7 +1171,7 @@ class YouTubeRipperApp(ctk.CTk):
         def _do_update():
             try:
                 # Download
-                req = urllib.request.Request(url, headers={"User-Agent": "Youtube-Audio-Ripper-updater"})
+                req = urllib.request.Request(url, headers={"User-Agent": "Youtube Audio Ripper-updater"})
                 with urllib.request.urlopen(req, timeout=30) as resp:
                     data = resp.read()
                 Path(save_path).write_bytes(data)
