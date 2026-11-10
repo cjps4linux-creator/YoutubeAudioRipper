@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-YouTube Audio Ripper - Production-Grade UX-Enhanced Version (Phase 7)
+YouTube Audio Ripper - Production-Grade UX-Enhanced Version (Phase 8)
 Paste a YouTube link, get a FLAC named after the track. Local GUI, no account needed.
 
 Phase 1 — Stabilise: class name fix, logging module, FFmpeg pre-flight check,
@@ -25,6 +25,10 @@ coverage reporting, standalone rip_single_url() helper.
 
 Phase 7 — UX Enhancements: download history UI, dark/light theme toggle,
 keyboard shortcuts, portable mode, auto-updater client, enhanced tray.
+
+Phase 8 — Documentation & Operations: user manual, troubleshooting guide,
+release notes template, code signing docs, auto-download updates,
+cross-platform CI builds.
 """
 
 import concurrent.futures

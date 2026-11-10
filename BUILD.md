@@ -1,4 +1,4 @@
-# YouTube Audio Ripper — Build & Installer Roadmap (Phase 3)
+# YouTube Audio Ripper — Build & Installer Roadmap (All Phases)
 
 This document covers producing distributable standalone executables and installers
 for Windows, macOS, and Linux.

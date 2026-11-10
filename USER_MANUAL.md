@@ -1,6 +1,6 @@
 # YouTube Audio Ripper — User Manual
 
-**Version 2.2.0** · Conrad CJ Wilson · https://github.com/cjps4linux-creator/youtube-audio-ripper
+**Version 2.3.0** · Conrad CJ Wilson · https://github.com/cjps4linux-creator/youtube-audio-ripper
 
 ---
 
