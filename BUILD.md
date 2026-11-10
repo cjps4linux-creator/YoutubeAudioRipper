@@ -119,3 +119,16 @@ To ship updates:
 - [ ] Build Linux deb/rpm (optional)
 - [ ] Create GitHub release with assets
 - [ ] Verify auto-updater detects the new release
+
+---
+
+## Code Signing — Skipped
+
+This project does **not** purchase a code signing certificate. Distributable
+artifacts (EXE, ZIP, installer) are unsigned. Windows users will see an
+"Unknown publisher" SmartScreen warning on first run — click **More info →
+Run anyway**.
+
+If you ever want to sign artifacts, add a `signtool.exe` step to
+`.github/workflows/release.yml` and purchase a certificate from DigiCert,
+Sectigo, or GlobalSign (~$250–$500/year). See `CODESIGNING.md`.

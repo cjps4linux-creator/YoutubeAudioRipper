@@ -73,3 +73,21 @@ MIT  -  see [LICENSE](LICENSE).
 Built by **Conrad CJ Wilson**  -  [GitHub](https://github.com/cjps4linux-creator) · [LinkedIn](https://linkedin.com/in/conradcjwilson)
 
 `conradcjwilson0@gmail.com`
+
+---
+
+## Windows: "Unknown Publisher" Warning
+
+The distributed `YouTube Audio Ripper.exe` is **not code-signed** (no
+certificate purchased). On first launch, Windows SmartScreen may show an
+"Unknown publisher" warning. Click **More info → Run anyway** — this only
+happens once per version.
+
+This is intentional: no budget for a code signing certificate (~$250–$500/year).
+If you trust the source, the warning can be safely ignored.
+
+## Download
+
+Get the latest standalone EXE from the
+[Releases page](https://github.com/cjps4linux-creator/youtube-audio-ripper/releases).
+No installation required — just run the EXE.

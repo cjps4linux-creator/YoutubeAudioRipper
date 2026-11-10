@@ -1,84 +1,52 @@
-# Code Signing — Administrative Task
+# Code Signing — Not Required
 
-**Status:** Pending (not yet implemented)  
+**Status:** Skipped (by design)  
 **Owner:** Conrad CJ Wilson  
-**Priority:** High (Windows users see "Unknown publisher" warning)
+**Priority:** None — users accept "Unknown publisher" warning
 
 ---
 
-## Problem
+## Decision
 
-Windows SmartScreen and Defender show an "Unknown publisher" warning when
-running or installing `YouTube Audio Ripper.exe` because the executable is not
-digitally signed. This discourages users and may trigger automatic quarantine.
+We are **not purchasing a code signing certificate**. Windows SmartScreen will show
+an "Unknown publisher" warning when running `YouTube Audio Ripper.exe` for the
+first time. Users click **"More info" → "Run anyway"** and the app works normally.
 
-## Solution
+This is acceptable for:
+- Personal use
+- Small open-source projects
+- Projects with no budget for certificates (~$250–$500/year)
 
-Purchase a **code signing certificate** from a trusted Certificate Authority
-(CA) and sign all distributable artifacts:
+---
 
-| Artifact | Signing Required | Tool |
-|----------|-----------------|------|
-| `YouTube Audio Ripper.exe` | Yes | `signtool.exe` (Windows SDK) |
-| `YouTube-Audio-Ripper-*.zip` | Yes | `signtool.exe` |
-| Inno Setup `.exe` installer | Yes | `signtool.exe` |
+## What Users See
 
-## Recommended Certificate Authorities
+On first launch, Windows Defender SmartScreen may show:
 
-| CA | Product | Approx. Cost | Validation |
-|----|---------|-------------|------------|
-| DigiCert | Code Signing Certificate | ~$500/year | Organisation validation |
-| Sectigo (formerly Comodo) | Code Signing Certificate | ~$250/year | Organisation validation |
-| GlobalSign | Code Signing Certificate | ~$400/year | Organisation validation |
+> "Windows protected your PC"
+> Microsoft Defender SmartScreen prevented an unrecognized app from starting.
 
-> EV (Extended Validation) code signing certificates provide immediate
-> SmartScreen reputation but cost more (~$600–$800/year). Standard OV
-> certificates build reputation over time.
+**To proceed:**
+1. Click **More info**
+2. Click **Run anyway**
+3. The app launches normally
 
-## Implementation Steps
+This only happens once per EXE version. Subsequent launches of the same file
+don't show the warning.
 
-1. **Purchase** a code signing certificate from DigiCert, Sectigo, or GlobalSign.
-2. **Complete organisation validation** (provide business documents, D-U-N-S number).
-3. **Install the certificate** on the build machine (Windows with Windows SDK).
-4. **Add a CI step** to sign artifacts before upload:
+---
 
-   ```yaml
-   - name: Sign Windows EXE
-     shell: pwsh
-     run: |
-       & "C:\Program Files (x86)\Windows Kits\10\bin\<arch>\signtool.exe" sign `
-         /f "path/to/certificate.pfx" `
-         /p "$env:CODESIGN_PASSWORD" `
-         /tr "http://timestamp.digicert.com" `
-         /td SHA256 `
-         /fd SHA256 `
-         "dist/YouTube Audio Ripper/YouTube Audio Ripper.exe"
-   ```
+## If You Change Your Mind Later
 
-5. **Store the certificate password** as a GitHub Secret (`CODESIGN_PASSWORD`).
-6. **Verify signatures** after signing:
+If you ever want to eliminate the warning, purchase a code signing certificate
+from DigiCert, Sectigo, or GlobalSign (~$250–$500/year), then add a `signtool.exe`
+step to `.github/workflows/release.yml` between "Bundle FFmpeg" and
+"Create release zip."
 
-   ```powershell
-   signtool.exe verify /pa /v "dist/YouTube Audio Ripper/YouTube Audio Ripper.exe"
-   ```
-
-## CI Integration
-
-Add the signing step to `.github/workflows/release.yml` between the "Bundle FFmpeg"
-and "Create release zip" steps. The signing job must run on `windows-latest`
-where `signtool.exe` is available.
+---
 
 ## Verification
 
-After signing, confirm:
-
-- [ ] `signtool verify` passes for all artifacts
-- [ ] Windows SmartScreen no longer shows "Unknown publisher"
-- [ ] File Properties → Digital Signatures shows the certificate
-- [ ] SHA256 checksums match between signed and unsigned builds
-
----
-
-**Note:** This is an administrative task requiring a financial decision and
-organisation validation. It cannot be fully automated in CI without the
-certificate file and password.
+- [x] App runs without code signing (verified)
+- [x] FFmpeg + ffprobe bundle alongside EXE (verified)
+- [x] Users can click "Run anyway" on SmartScreen warning
