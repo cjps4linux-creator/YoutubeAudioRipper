@@ -37,3 +37,10 @@ debug_files.py
 final_test.py
 simple_test.py
 test_app.py
+
+# PyInstaller build artifacts
+build/
+dist/
+*.spec
+!build/build_windows.bat
+!build/youtube_ripper.spec
