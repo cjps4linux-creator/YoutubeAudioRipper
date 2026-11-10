@@ -1,46 +1,58 @@
 #!/usr/bin/env python3
 """
-YouTube Audio Ripper - Production-Grade Hardened Version (Phase 2)
+YouTube Audio Ripper - Production-Grade Polished Version (Phase 3)
 Paste a YouTube link, get a FLAC named after the track. Local GUI, no account needed.
 
 Phase 1 — Stabilise: class name fix, logging module, FFmpeg pre-flight check,
-URL validation regex, sanitised filenames, [lorem]→job_id fix, CI test isolation,
-path traversal protection.
+URL validation regex, sanitised filenames, CI test isolation, path traversal
+protection.
 
 Phase 2 — Harden: cookies-from-browser support, resume partial downloads,
-deduplication registry, metadata embedding (title/artist/album/track),
-retry with exponential backoff on transient yt-dlp failures.
+deduplication registry, metadata embedding, retry with exponential backoff.
+
+Phase 3 — Polish: settings/preferences UI, per-file batch progress,
+file management (rename/delete/open/play), PyInstaller build spec,
+auto-updater, installer roadmap.
 """
 
 import json
 import logging
 import logging.handlers
+import os
+import platform
 import re
 import subprocess
 import sys
 import tempfile
 import threading
 import time
+import urllib.request
 from pathlib import Path
 
 import customtkinter as ctk
 
 # ── Configuration ──────────────────────────────────────────────────────
 APP_DIR = Path(__file__).parent.resolve()
-OUTPUT_DIR = APP_DIR / "ripped_music"
+SETTINGS_FILE = APP_DIR / "settings.json"
 LOG_FILE = APP_DIR / "youtube_ripper.log"
-DOWNLOADS_REGISTRY = OUTPUT_DIR / "downloads.json"
+DOWNLOADS_REGISTRY = APP_DIR / "downloads.json"
+DEFAULT_OUTPUT_DIR = APP_DIR / "ripped_music"
 
 MAX_URL_LENGTH = 2048
 MAX_URLS_PER_BATCH = 50
 MAX_DOWNLOAD_RETRIES = 3
 RETRY_BASE_DELAY = 1.0  # seconds
 
+GITHUB_REPO = "cjps4linux-creator/youtube-audio-ripper"
+GITHUB_API_LATEST = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+CURRENT_VERSION = "2.0.0"
+
 YOUTUBE_URL_RE = re.compile(
     r"^https?://(?:www\.)?(?:youtube\.com/watch\?v=|youtu\.be/)[\w-]{11}(?:[?&].*)?$",
     re.IGNORECASE,
 )
 
+SUPPORTED_FORMATS = ["FLAC", "MP3", "M4A"]
 SUPPORTED_BROWSERS = [
     "None",
     "Chrome",
@@ -51,21 +63,26 @@ SUPPORTED_BROWSERS = [
     "Brave",
 ]
 
-OUTPUT_DIR.mkdir(exist_ok=True)
+DEFAULT_SETTINGS = {
+    "output_dir": str(DEFAULT_OUTPUT_DIR),
+    "default_format": "FLAC",
+    "cookies_browser": "None",
+    "ai_sensitivity_threshold": 0.7,
+}
+
+ctk.set_appearance_mode("dark")
+ctk.set_default_color_theme("blue")
+
 
 # ── Logging ────────────────────────────────────────────────────────────
 logger = logging.getLogger("youtube_ripper")
 logger.setLevel(logging.DEBUG)
 
-# Console handler
 _console_handler = logging.StreamHandler(sys.stdout)
 _console_handler.setLevel(logging.INFO)
-_console_handler.setFormatter(
-    logging.Formatter("%(levelname)s: %(message)s")
-)
+_console_handler.setFormatter(logging.Formatter("%(levelname)s: %(message)s"))
 logger.addHandler(_console_handler)
 
-# File handler (rotating, keeps last 5 files × 5 MB each)
 _file_handler = logging.handlers.RotatingFileHandler(
     LOG_FILE, maxBytes=5 * 1024 * 1024, backupCount=5, encoding="utf-8"
 )
@@ -102,42 +119,29 @@ def _check_yt_dlp() -> bool:
 
 # ── Validation helpers ─────────────────────────────────────────────────
 def validate_youtube_url(url: str) -> tuple[bool, str | None]:
-    """
-    Validate a single YouTube URL.
-    Returns (is_valid, error_message_or_none).
-    """
+    """Validate a single YouTube URL. Returns (is_valid, error_or_none)."""
     if not url or not url.strip():
         return False, "URL is empty."
-
     url = url.strip()
-
     if len(url) > MAX_URL_LENGTH:
         return False, f"URL too long ({len(url)} chars, max {MAX_URL_LENGTH})."
-
     if not YOUTUBE_URL_RE.match(url):
         return False, "Not a valid YouTube video URL."
-
     return True, None
 
 
 def validate_urls(urls: list[str]) -> tuple[list[str], list[str]]:
-    """
-    Validate a list of URLs.
-    Returns (valid_urls, error_messages).
-    """
+    """Validate a list of URLs. Returns (valid_urls, error_messages)."""
     if len(urls) > MAX_URLS_PER_BATCH:
         return [], [f"Too many URLs ({len(urls)}, max {MAX_URLS_PER_BATCH})."]
-
     valid: list[str] = []
     errors: list[str] = []
-
     for url in urls:
         ok, err = validate_youtube_url(url)
         if ok:
             valid.append(url)
         else:
             errors.append(err or "Invalid URL.")
-
     return valid, errors
 
 
@@ -145,23 +149,41 @@ def sanitize_filename(title: str) -> str:
     """Convert YouTube title to a safe filesystem filename."""
     if not title:
         return "Unknown_Track"
-
-    # Remove invalid filename characters
     invalid = '<>:\"/\\|?*'
     for char in invalid:
         title = title.replace(char, "")
-
-    # Collapse multiple spaces
     title = re.sub(r"\s+", " ", title).strip()
-
-    # Limit length
     title = title[:80]
-
     return title if title else "Unknown_Track"
 
 
+# ── Settings ───────────────────────────────────────────────────────────
+def load_settings() -> dict:
+    """Load settings from settings.json, falling back to defaults."""
+    try:
+        data = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            merged = dict(DEFAULT_SETTINGS)
+            merged.update(data)
+            return merged
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        pass
+    return dict(DEFAULT_SETTINGS)
+
+
+def save_settings(settings: dict) -> None:
+    """Persist settings to settings.json."""
+    try:
+        SETTINGS_FILE.write_text(
+            json.dumps(settings, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+    except OSError as exc:
+        logger.warning("Could not save settings: %s", exc)
+
+
 # ── Downloads registry (deduplication) ─────────────────────────────────
-def _load_downloads_registry() -> dict[str, str]:
+def load_registry() -> dict[str, str]:
     """Load the URL -> filename registry from disk."""
     try:
         data = json.loads(DOWNLOADS_REGISTRY.read_text(encoding="utf-8"))
@@ -172,7 +194,7 @@ def _load_downloads_registry() -> dict[str, str]:
     return {}
 
 
-def _save_downloads_registry(registry: dict[str, str]) -> None:
+def save_registry(registry: dict[str, str]) -> None:
     """Persist the URL -> filename registry to disk."""
     try:
         DOWNLOADS_REGISTRY.write_text(
@@ -183,26 +205,20 @@ def _save_downloads_registry(registry: dict[str, str]) -> None:
         logger.warning("Could not save downloads registry: %s", exc)
 
 
-def _is_already_downloaded(url: str, registry: dict[str, str]) -> str | None:
-    """
-    Check if a URL has already been downloaded and the file still exists.
-    Returns the existing filename if found, else None.
-    """
+def is_already_downloaded(url: str, registry: dict[str, str]) -> str | None:
+    """Return existing filename if URL was already downloaded and file exists."""
     filename = registry.get(url)
     if filename:
-        existing_path = OUTPUT_DIR / filename
+        existing_path = Path(load_settings().get("output_dir", str(DEFAULT_OUTPUT_DIR))) / filename
         if existing_path.exists():
             return filename
     return None
 
 
 # ── Retry with exponential backoff ─────────────────────────────────────
-def _retry_download(func, *args, max_retries: int = MAX_DOWNLOAD_RETRIES,
-                    base_delay: float = RETRY_BASE_DELAY, **kwargs):
-    """
-    Execute *func* with exponential backoff retries.
-    Retries on any Exception. Delays: base, base*2, base*4, ...
-    """
+def retry_download(func, *args, max_retries: int = MAX_DOWNLOAD_RETRIES,
+                   base_delay: float = RETRY_BASE_DELAY, **kwargs):
+    """Execute func with exponential backoff retries. Delays: base, base*2, base*4..."""
     last_error: Exception | None = None
     for attempt in range(1, max_retries + 1):
         try:
@@ -217,61 +233,84 @@ def _retry_download(func, *args, max_retries: int = MAX_DOWNLOAD_RETRIES,
                 )
                 time.sleep(delay)
             else:
-                logger.error(
-                    "Download failed after %d attempts: %s",
-                    max_retries, exc,
-                )
+                logger.error("Download failed after %d attempts: %s", max_retries, exc)
     raise last_error  # type: ignore[misc]
 
 
+# ── Auto-updater ───────────────────────────────────────────────────────
+def check_for_updates() -> dict | None:
+    """Check GitHub releases for a newer version. Returns release info or None."""
+    try:
+        req = urllib.request.Request(
+            GITHUB_API_LATEST,
+            headers={"User-Agent": "youtube-audio-ripper-updater"},
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        tag = data.get("tag_name", "").lstrip("v")
+        if not tag:
+            return None
+        cur = [int(x) for x in CURRENT_VERSION.split(".")]
+        new = [int(x) for x in tag.split(".")]
+        if new > cur:
+            return {
+                "version": tag,
+                "url": data.get("html_url", ""),
+                "body": data.get("body", ""),
+            }
+    except Exception as exc:
+        logger.warning("Auto-update check failed: %s", exc)
+    return None
+
+
 # ── Application ────────────────────────────────────────────────────────
-ctk.set_appearance_mode("dark")
-ctk.set_default_color_theme("blue")
-
-
 class YouTubeRipperApp(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title("YouTube Audio Ripper")
-        self.geometry("700x620")
+        self.geometry("800x720")
 
         # Center window
         self.update_idletasks()
-        x = (self.winfo_screenwidth() - 700) // 2
-        y = (self.winfo_screenheight() - 620) // 2
+        x = (self.winfo_screenwidth() - 800) // 2
+        y = (self.winfo_screenheight() - 720) // 2
         self.geometry(f"+{x}+{y}")
 
+        self.settings = load_settings()
+        self.downloads_registry = load_registry()
         self.processing = False
-        self.downloads_registry: dict[str, str] = _load_downloads_registry()
+        self.current_job = 0
+        self.total_jobs = 0
         self._build_ui()
 
-        # Run pre-flight checks after UI is built
+        # Run pre-flight + update check after UI is built
         self.after(100, self._pre_flight_check)
+        self.after(1500, self._check_updates)
 
     # ── UI Construction ──────────────────────────────────────────────
     def _build_ui(self):
-        # Main frame
-        main = ctk.CTkFrame(self)
-        main.pack(fill="both", expand=True, padx=20, pady=20)
+        # Main frame with scrollable content
+        self.main = ctk.CTkScrollableFrame(self)
+        self.main.pack(fill="both", expand=True, padx=20, pady=20)
 
-        # Title
+        # ── Header ─────────────────────────────────────────────────
         ctk.CTkLabel(
-            main, text="🎵 YouTube Audio Ripper",
-            font=ctk.CTkFont(size=22, weight="bold"),
+            self.main, text="🎵 YouTube Audio Ripper",
+            font=ctk.CTkFont(size=24, weight="bold"),
         ).pack(pady=(0, 5))
         ctk.CTkLabel(
-            main, text="Download → FLAC with metadata & resume support",
+            self.main, text=f"v{CURRENT_VERSION}  •  Download → FLAC/MP3/M4A with metadata",
             font=ctk.CTkFont(size=11), text_color="gray",
         ).pack(pady=(0, 15))
 
-        # URL Input
+        # ── URL Input ──────────────────────────────────────────────
         ctk.CTkLabel(
-            main, text="YouTube URLs (one per line):",
+            self.main, text="YouTube URLs (one per line):",
             font=ctk.CTkFont(size=12, weight="bold"),
         ).pack(anchor="w", pady=(0, 5))
 
         self.url_text = ctk.CTkTextbox(
-            main, height=70,
+            self.main, height=80,
             font=ctk.CTkFont(family="Consolas", size=11),
         )
         self.url_text.pack(fill="x", pady=(0, 10))
@@ -279,87 +318,163 @@ class YouTubeRipperApp(ctk.CTk):
             "0.0", "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
         )
 
-        # Validation hint
         self.hint_label = ctk.CTkLabel(
-            main,
+            self.main,
             text="Paste one or more YouTube video URLs (one per line). Max 50 per batch.",
             font=ctk.CTkFont(size=9), text_color="gray",
         )
-        self.hint_label.pack(anchor="w", pady=(0, 5))
+        self.hint_label.pack(anchor="w", pady=(0, 10))
 
-        # Options row
-        options_frame = ctk.CTkFrame(main, fg_color="transparent")
-        options_frame.pack(fill="x", pady=(0, 10))
+        # ── Options ────────────────────────────────────────────────
+        opts = ctk.CTkFrame(self.main, fg_color="transparent")
+        opts.pack(fill="x", pady=(0, 10))
 
-        # Cookies browser dropdown
-        ctk.CTkLabel(
-            options_frame, text="Authentication:",
-            font=ctk.CTkFont(size=11, weight="bold"),
-        ).pack(side="left", padx=(0, 6))
-        self.browser_var = ctk.StringVar(value="None")
+        ctk.CTkLabel(opts, text="Format:", font=ctk.CTkFont(size=11, weight="bold")).pack(side="left", padx=(0, 6))
+        self.format_var = ctk.StringVar(value=self.settings.get("default_format", "FLAC"))
+        self.format_dropdown = ctk.CTkOptionMenu(
+            opts, values=SUPPORTED_FORMATS, variable=self.format_var,
+            width=110, font=ctk.CTkFont(size=11),
+        )
+        self.format_dropdown.pack(side="left", padx=(0, 20))
+
+        ctk.CTkLabel(opts, text="Auth:", font=ctk.CTkFont(size=11, weight="bold")).pack(side="left", padx=(0, 6))
+        self.browser_var = ctk.StringVar(value=self.settings.get("cookies_browser", "None"))
         self.browser_dropdown = ctk.CTkOptionMenu(
-            options_frame,
-            values=SUPPORTED_BROWSERS,
-            variable=self.browser_var,
-            width=140,
-            font=ctk.CTkFont(size=11),
+            opts, values=SUPPORTED_BROWSERS, variable=self.browser_var,
+            width=110, font=ctk.CTkFont(size=11),
         )
         self.browser_dropdown.pack(side="left")
 
-        # BIG START BUTTON
+        # ── Start Button ───────────────────────────────────────────
         self.start_btn = ctk.CTkButton(
-            main, text="🎵 START RIPPING 🎵",
+            self.main, text="🎵 START RIPPING 🎵",
             font=ctk.CTkFont(size=20, weight="bold"),
             height=60, fg_color="green", hover_color="darkgreen",
             command=self._start_rip,
         )
         self.start_btn.pack(fill="x", pady=15)
 
-        # Progress
-        self.progress = ctk.CTkProgressBar(main)
-        self.progress.pack(fill="x", pady=(0, 5))
-        self.progress.set(0)
+        # ── Batch Progress ─────────────────────────────────────────
+        self.batch_frame = ctk.CTkFrame(self.main)
+        self.batch_frame.pack(fill="x", pady=(0, 10))
+        self.batch_frame.pack_forget()
 
-        self.status = ctk.CTkLabel(
-            main, text="Ready", font=ctk.CTkFont(size=10)
+        self.batch_label = ctk.CTkLabel(
+            self.batch_frame, text="Batch Progress", font=ctk.CTkFont(size=12, weight="bold")
         )
-        self.status.pack()
+        self.batch_label.pack(anchor="w", padx=10, pady=(10, 5))
 
-        # Log
+        self.file_progress = ctk.CTkProgressBar(self.batch_frame)
+        self.file_progress.pack(fill="x", padx=10, pady=(0, 5))
+        self.file_progress.set(0)
+
+        self.file_label = ctk.CTkLabel(
+            self.batch_frame, text="Idle", font=ctk.CTkFont(size=10)
+        )
+        self.file_label.pack(anchor="w", padx=10, pady=(0, 5))
+
+        self.batch_progress = ctk.CTkProgressBar(self.batch_frame)
+        self.batch_progress.pack(fill="x", padx=10, pady=(0, 10))
+        self.batch_progress.set(0)
+
+        # ── Settings ───────────────────────────────────────────────
+        self.settings_frame = ctk.CTkFrame(self.main)
+        self.settings_frame.pack(fill="x", pady=(0, 10))
+
         ctk.CTkLabel(
-            main, text="Log:",
-            font=ctk.CTkFont(size=11, weight="bold"),
+            self.settings_frame, text="Settings / Preferences",
+            font=ctk.CTkFont(size=12, weight="bold"),
+        ).pack(anchor="w", padx=10, pady=(10, 5))
+
+        out_row = ctk.CTkFrame(self.settings_frame, fg_color="transparent")
+        out_row.pack(fill="x", padx=10, pady=5)
+        ctk.CTkLabel(out_row, text="Output Directory:", width=140).pack(side="left")
+        self.output_dir_var = ctk.StringVar(value=self.settings.get("output_dir", str(DEFAULT_OUTPUT_DIR)))
+        self.output_dir_entry = ctk.CTkEntry(out_row, textvariable=self.output_dir_var, width=350)
+        self.output_dir_entry.pack(side="left", padx=(10, 10), fill="x", expand=True)
+        ctk.CTkButton(out_row, text="Browse", width=70, command=self._browse_output_dir).pack(side="left")
+
+        ai_row = ctk.CTkFrame(self.settings_frame, fg_color="transparent")
+        ai_row.pack(fill="x", padx=10, pady=5)
+        ctk.CTkLabel(ai_row, text="AI Sensitivity Threshold:", width=140).pack(side="left")
+        self.ai_slider = ctk.CTkSlider(
+            ai_row, from_=0.1, to=1.0, number_of_steps=9,
+            command=lambda v: self.ai_value_label.configure(text=f"{v:.1f}"),
+        )
+        self.ai_slider.pack(side="left", padx=(10, 10), fill="x", expand=True)
+        self.ai_slider.set(self.settings.get("ai_sensitivity_threshold", 0.7))
+        self.ai_value_label = ctk.CTkLabel(ai_row, text=f"{self.settings.get('ai_sensitivity_threshold', 0.7):.1f}", width=40)
+        self.ai_value_label.pack(side="left")
+
+        ctk.CTkButton(
+            self.settings_frame, text="Save Settings", command=self._save_settings,
+            width=120,
+        ).pack(anchor="e", padx=10, pady=(5, 10))
+
+        # ── Log ────────────────────────────────────────────────────
+        ctk.CTkLabel(
+            self.main, text="Log:", font=ctk.CTkFont(size=11, weight="bold"),
         ).pack(anchor="w", pady=(10, 5))
         self.log = ctk.CTkTextbox(
-            main, height=140,
+            self.main, height=150,
             font=ctk.CTkFont(family="Consolas", size=10), state="disabled",
         )
-        self.log.pack(fill="both", expand=True)
+        self.log.pack(fill="both", expand=True, pady=(0, 10))
+
+        # ── File Management ────────────────────────────────────────
+        self.file_mgmt_frame = ctk.CTkFrame(self.main)
+        self.file_mgmt_frame.pack(fill="x", pady=(0, 10))
+        self.file_mgmt_frame.pack_forget()
+
+        ctk.CTkLabel(
+            self.file_mgmt_frame, text="Downloaded Files",
+            font=ctk.CTkFont(size=12, weight="bold"),
+        ).pack(anchor="w", padx=10, pady=(10, 5))
+
+        self.file_listbox = ctk.CTkScrollableFrame(self.file_mgmt_frame, height=140)
+        self.file_listbox.pack(fill="x", padx=10, pady=(0, 10))
+
+        self.refresh_files_btn = ctk.CTkButton(
+            self.file_mgmt_frame, text="🔄 Refresh File List", command=self._refresh_file_list,
+            width=180,
+        )
+        self.refresh_files_btn.pack(anchor="e", padx=10, pady=(0, 10))
 
     # ── Logging ────────────────────────────────────────────────────────
     def _gui_log(self, msg: str):
-        """Write a message to the GUI log box."""
         self.log.configure(state="normal")
         self.log.insert("end", msg + "\n")
         self.log.see("end")
         self.log.configure(state="disabled")
 
     def _log(self, msg: str, level: str = "info"):
-        """Log to both GUI and file/console."""
         getattr(logger, level)(msg)
         self.after(0, self._gui_log, msg)
 
-    # ── Pre-flight ─────────────────────────────────────────────────────
-    def _pre_flight_check(self):
-        """Verify required system dependencies before user starts ripping."""
-        missing = []
+    # ── Settings actions ─────────────────────────────────────────────
+    def _browse_output_dir(self):
+        from tkinter import filedialog
+        directory = filedialog.askdirectory(initialdir=self.output_dir_var.get())
+        if directory:
+            self.output_dir_var.set(directory)
 
+    def _save_settings(self):
+        self.settings["output_dir"] = self.output_dir_var.get()
+        self.settings["default_format"] = self.format_var.get()
+        self.settings["cookies_browser"] = self.browser_var.get()
+        self.settings["ai_sensitivity_threshold"] = round(float(self.ai_slider.get()), 1)
+        save_settings(self.settings)
+        Path(self.settings["output_dir"]).mkdir(parents=True, exist_ok=True)
+        self._gui_log("✅ Settings saved")
+        logger.info("Settings saved: %s", self.settings)
+
+    # ── Pre-flight & updates ─────────────────────────────────────────
+    def _pre_flight_check(self):
+        missing = []
         if not _check_ffmpeg():
             missing.append("ffmpeg")
-
         if not _check_yt_dlp():
             missing.append("yt-dlp (Python package)")
-
         if missing:
             msg = (
                 "⚠️ Missing required dependency:\n\n"
@@ -371,8 +486,23 @@ class YouTubeRipperApp(ctk.CTk):
             self._gui_log(msg)
             logger.error("Pre-flight check failed: missing %s", ", ".join(missing))
 
-    # ── Download flow ──────────────────────────────────────────────────
+    def _check_updates(self):
+        release = check_for_updates()
+        if release:
+            msg = (
+                f"🆕 Update available: v{release['version']} (current v{CURRENT_VERSION})\n"
+                f"{release['body'][:200]}...\n"
+                f"Download: {release['url']}"
+            )
+            self._gui_log(msg)
+            logger.info("Update available: v%s", release["version"])
+        else:
+            logger.info("No update available")
+
+    # ── Download flow ────────────────────────────────────────────────
     def _start_rip(self):
+        if self.processing:
+            return
         urls_text = self.url_text.get("0.0", "end").strip()
         if not urls_text:
             self._gui_log("❌ Enter YouTube URLs first")
@@ -380,70 +510,78 @@ class YouTubeRipperApp(ctk.CTk):
 
         raw_urls = [line.strip() for line in urls_text.split("\n") if line.strip()]
         valid_urls, errors = validate_urls(raw_urls)
-
         if errors:
             for err in errors:
                 self._gui_log(f"❌ {err}")
             if not valid_urls:
                 return
-
         if not valid_urls:
             self._gui_log("❌ No valid YouTube URLs found")
             return
 
+        self.processing = True
+        self.total_jobs = len(valid_urls)
+        self.current_job = 0
+
         self.start_btn.configure(state="disabled", text="⏳ Processing…")
-        self.progress.set(0.1)
-        self._log(f"📋 Processing {len(valid_urls)} URL(s)…")
+        self.file_progress.set(0)
+        self.batch_progress.set(0)
+        self.batch_frame.pack(fill="x", pady=(0, 10))
+        self.file_label.configure(text=f"Starting batch of {self.total_jobs}…")
+        self._gui_log(f"📋 Processing {self.total_jobs} URL(s)…")
+        Path(self.settings.get("output_dir", str(DEFAULT_OUTPUT_DIR))).mkdir(parents=True, exist_ok=True)
 
         threading.Thread(target=self._process, args=(valid_urls,), daemon=True).start()
 
     def _process(self, urls: list[str]):
+        output_dir = Path(self.settings.get("output_dir", str(DEFAULT_OUTPUT_DIR)))
+        output_dir.mkdir(parents=True, exist_ok=True)
+
         for i, url in enumerate(urls):
-            self.after(0, self._gui_log, f"\n[{i + 1}/{len(urls)}] {url[:60]}…")
+            self.current_job = i + 1
+            self.after(0, self._update_batch_progress, i, url)
             try:
-                self._download_convert(url)
+                self._download_convert(url, output_dir)
             except Exception as e:
                 self.after(0, self._gui_log, f"❌ Error: {str(e)[:100]}")
                 logger.exception("Download failed for %s", url)
 
         self.after(0, self._done)
 
-    def _download_convert(self, url: str):
-        """Download, deduplicate-check, convert, and embed metadata."""
+    def _update_batch_progress(self, index: int, url: str):
+        self.file_label.configure(text=f"[{index + 1}/{self.total_jobs}] {url[:50]}…")
+        self.batch_progress.set(index / self.total_jobs if self.total_jobs else 0)
+
+    def _download_convert(self, url: str, output_dir: Path):
         import yt_dlp
 
-        # ── Deduplication check ───────────────────────────────────────
-        existing_filename = _is_already_downloaded(url, self.downloads_registry)
-        if existing_filename:
-            self.after(0, self._gui_log, f"⏭️ Skipping (already downloaded): {existing_filename}")
+        existing = is_already_downloaded(url, self.downloads_registry)
+        if existing:
+            self.after(0, self._gui_log, f"⏭️ Skipping (already downloaded): {existing}")
+            self.after(0, self._update_batch_progress, self.current_job - 1, url)
             return
 
         temp_dir = Path(tempfile.gettempdir())
         temp_file = temp_dir / "ripper_temp.%(ext)s"
-
-        # Clean old temp files
         for f in temp_dir.glob("ripper_temp.*"):
             f.unlink(missing_ok=True)
 
         self.after(0, self._gui_log, "Downloading…")
-        self.after(0, self.progress.configure, {"value": 0.2})
+        self.after(0, self.file_progress.configure, {"value": 0.2})
 
-        # ── yt-dlp options ────────────────────────────────────────────
-        cookies_from_browser = self.browser_var.get()
+        cookies_from_browser = self.settings.get("cookies_browser", "None")
         ydl_opts = {
             "format": "bestaudio/best",
             "outtmpl": str(temp_file),
             "quiet": True,
             "no_warnings": True,
-            "continuedl": True,  # resume partial downloads
-            "noplaylist": True,  # single video only
+            "continuedl": True,
+            "noplaylist": True,
         }
-
         if cookies_from_browser != "None":
             ydl_opts["cookiesfrombrowser"] = cookies_from_browser
             self.after(0, self._gui_log, f"Using cookies from {cookies_from_browser}…")
 
-        # ── Retry-wrapped download ────────────────────────────────────
         def _do_download():
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=True)
@@ -454,78 +592,155 @@ class YouTubeRipperApp(ctk.CTk):
                 return info, title, artist, album, track
 
         try:
-            info, title, artist, album, track = _retry_download(_do_download)
+            info, title, artist, album, track = retry_download(_do_download)
         except Exception as exc:
             self.after(0, self._gui_log, f"❌ Download failed after retries: {str(exc)[:100]}")
             raise
 
         self.after(0, self._gui_log, f"✅ Downloaded: {title[:40]}")
+        self.after(0, self.file_progress.configure, {"value": 0.5})
 
-        # Find downloaded file
         downloaded = None
         for f in temp_dir.glob("ripper_temp.*"):
             if f.exists():
                 downloaded = f
                 break
-
         if not downloaded:
             raise FileNotFoundError("Download failed — no output file found")
 
         self.after(0, self._gui_log, "Converting to FLAC…")
-        self.after(0, self.progress.configure, {"value": 0.6})
+        self.after(0, self.file_progress.configure, {"value": 0.7})
 
-        # Build output filename
+        fmt = self.settings.get("default_format", "FLAC")
         safe_title = sanitize_filename(title)
-        output_file = OUTPUT_DIR / f"{safe_title}.flac"
+        output_file = output_dir / f"{safe_title}.{fmt.lower()}"
 
-        # Avoid overwriting: add counter suffix
         counter = 1
         original_output = output_file
         while output_file.exists():
-            output_file = OUTPUT_DIR / f"{original_output.stem}_{counter}.flac"
+            output_file = output_dir / f"{original_output.stem}_{counter}.{fmt.lower()}"
             counter += 1
 
-        # ── FFmpeg conversion with metadata embedding ─────────────────
         ffmpeg_cmd = [
             "ffmpeg", "-y", "-i", str(downloaded),
-            "-q:a", "0", "-c:a", "flac", "-ar", "44100",
+        ]
+        if fmt == "FLAC":
+            ffmpeg_cmd.extend(["-q:a", "0", "-c:a", "flac", "-ar", "44100"])
+        elif fmt == "MP3":
+            ffmpeg_cmd.extend(["-q:a", "0", "-c:a", "libmp3lame", "-ar", "44100"])
+        elif fmt == "M4A":
+            ffmpeg_cmd.extend(["-c:a", "aac", "-b:a", "256k", "-ar", "44100"])
+        ffmpeg_cmd.extend([
             "-metadata", f"title={title}",
             "-metadata", f"artist={artist}",
-        ]
+        ])
         if album:
             ffmpeg_cmd.extend(["-metadata", f"album={album}"])
         if track:
             ffmpeg_cmd.extend(["-metadata", f"track={track}"])
         ffmpeg_cmd.append(str(output_file))
 
-        result = subprocess.run(
-            ffmpeg_cmd,
-            capture_output=True,
-            text=True,
-        )
-
+        result = subprocess.run(ffmpeg_cmd, capture_output=True, text=True)
         if result.returncode != 0:
             raise RuntimeError("FFmpeg conversion failed")
 
-        # Cleanup temp
         downloaded.unlink(missing_ok=True)
 
-        # ── Update deduplication registry ─────────────────────────────
         self.downloads_registry[url] = output_file.name
-        _save_downloads_registry(self.downloads_registry)
+        save_registry(self.downloads_registry)
 
         size_mb = output_file.stat().st_size / (1024 * 1024)
         self.after(0, self._gui_log, f"✅ Saved: {output_file.name} ({size_mb:.1f} MB)")
-        self.after(0, self.progress.configure, {"value": 1.0})
-        logger.info(
-            "Saved %s (%.1f MB) from %s [cookies=%s]",
-            output_file.name, size_mb, url, cookies_from_browser,
-        )
+        self.after(0, self.file_progress.configure, {"value": 1.0})
+        logger.info("Saved %s (%.1f MB) from %s [format=%s]", output_file.name, size_mb, url, fmt)
 
     def _done(self):
+        self.processing = False
         self.start_btn.configure(state="normal", text="🎵 START RIPPING 🎵")
-        self._gui_log(f"\n✅ Done! Files in: {OUTPUT_DIR}")
-        logger.info("Batch complete. Output directory: %s", OUTPUT_DIR)
+        self.batch_frame.pack_forget()
+        self.file_progress.set(0)
+        self.batch_progress.set(0)
+        self._gui_log(f"\n✅ Done! Files in: {self.settings.get('output_dir', str(DEFAULT_OUTPUT_DIR))}")
+        logger.info("Batch complete. Output directory: %s", self.settings.get("output_dir"))
+        self._refresh_file_list()
+
+    # ── File Management ──────────────────────────────────────────────
+    def _refresh_file_list(self):
+        for widget in self.file_listbox.winfo_children():
+            widget.destroy()
+
+        output_dir = Path(self.settings.get("output_dir", str(DEFAULT_OUTPUT_DIR)))
+        if not output_dir.exists():
+            self.file_mgmt_frame.pack_forget()
+            return
+
+        files = sorted(
+            [f for f in output_dir.iterdir() if f.is_file() and f.suffix.lower() in (".flac", ".mp3", ".m4a")],
+            key=lambda f: f.stat().st_mtime,
+            reverse=True,
+        )
+
+        if not files:
+            self.file_mgmt_frame.pack_forget()
+            return
+
+        self.file_mgmt_frame.pack(fill="x", pady=(0, 10))
+
+        for f in files:
+            row = ctk.CTkFrame(self.file_listbox, fg_color="transparent")
+            row.pack(fill="x", padx=5, pady=2)
+
+            size_kb = f.stat().st_size / 1024
+            name_label = ctk.CTkLabel(
+                row, text=f"{f.name}  ({size_kb:.0f} KB)",
+                font=ctk.CTkFont(size=10), anchor="w",
+            )
+            name_label.pack(side="left", fill="x", expand=True, padx=(0, 10))
+
+            btns = ctk.CTkFrame(row, fg_color="transparent")
+            btns.pack(side="right")
+
+            ctk.CTkButton(btns, text="Open", width=50,
+                          command=lambda p=f: self._open_file(p)).pack(side="left", padx=2)
+            ctk.CTkButton(btns, text="Folder", width=50,
+                          command=lambda p=f: self._open_folder(p)).pack(side="left", padx=2)
+            ctk.CTkButton(btns, text="Delete", width=50, fg_color="red", hover_color="darkred",
+                          command=lambda p=f, n=f.name: self._delete_file(p, n)).pack(side="left", padx=2)
+
+    def _open_file(self, path: Path):
+        try:
+            if platform.system() == "Darwin":
+                subprocess.run(["open", str(path)], check=False)
+            elif platform.system() == "Windows":
+                os.startfile(str(path))  # type: ignore[attr-defined]
+            else:
+                subprocess.run(["xdg-open", str(path)], check=False)
+        except Exception as exc:
+            self._gui_log(f"❌ Could not open file: {exc}")
+
+    def _open_folder(self, path: Path):
+        folder = str(path.parent)
+        try:
+            if platform.system() == "Darwin":
+                subprocess.run(["open", folder], check=False)
+            elif platform.system() == "Windows":
+                os.startfile(folder)  # type: ignore[attr-defined]
+            else:
+                subprocess.run(["xdg-open", folder], check=False)
+        except Exception as exc:
+            self._gui_log(f"❌ Could not open folder: {exc}")
+
+    def _delete_file(self, path: Path, name: str):
+        try:
+            path.unlink()
+            for url, fname in list(self.downloads_registry.items()):
+                if fname == name:
+                    del self.downloads_registry[url]
+            save_registry(self.downloads_registry)
+            self._gui_log(f"🗑️ Deleted: {name}")
+            self._refresh_file_list()
+        except Exception as exc:
+            self._gui_log(f"❌ Could not delete: {exc}")
 
 
 if __name__ == "__main__":
