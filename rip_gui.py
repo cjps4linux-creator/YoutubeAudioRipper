@@ -316,6 +316,152 @@ def check_for_updates() -> dict | None:
     return None
 
 
+# ── Standalone download helper (for integration tests + CLI use) ───────
+
+
+def rip_single_url(url: str, output_dir: Path, format: str = "FLAC") -> dict:
+    """Download, convert, and embed metadata + cover art for a single URL.
+
+    Returns a dict:
+        {"ok": bool, "file": Path|None, "error": str|None, "size_mb": float}
+    """
+    import yt_dlp
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # ── Deduplication check ───────────────────────────────────────────
+    registry = load_registry()
+    existing = is_already_downloaded(url, registry)
+    if existing:
+        return {"ok": True, "file": output_dir / existing, "error": None, "size_mb": 0.0,
+                "skipped": True}
+
+    temp_dir = Path(tempfile.gettempdir())
+    tid = threading.get_ident()
+    temp_file = temp_dir / f"ripper_standalone_{tid}.%(ext)s"
+    thumbnail_file = temp_dir / f"ripper_standalone_thumb_{tid}.%(ext)s"
+
+    for f in temp_dir.glob(f"ripper_standalone_{tid}.*"):
+        f.unlink(missing_ok=True)
+    for f in temp_dir.glob(f"ripper_standalone_thumb_{tid}.*"):
+        f.unlink(missing_ok=True)
+
+    ydl_opts = {
+        "format": "bestaudio/best",
+        "outtmpl": str(temp_file),
+        "quiet": True,
+        "no_warnings": True,
+        "continuedl": True,
+        "noplaylist": True,
+    }
+
+    def _do_download():
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            title = info.get("title", "Unknown")
+            artist = info.get("artist") or info.get("uploader") or "Unknown Artist"
+            album = info.get("album") or ""
+            track = info.get("track") or ""
+            thumbnail = info.get("thumbnail") or ""
+            return info, title, artist, album, track, thumbnail
+
+    try:
+        info, title, artist, album, track, thumbnail_url = retry_download(_do_download)
+    except Exception as exc:
+        logger.error("Download failed for %s: %s", url, exc)
+        return {"ok": False, "file": None, "error": str(exc), "size_mb": 0.0}
+
+    downloaded = None
+    for f in temp_dir.glob(f"ripper_standalone_{tid}.*"):
+        if f.exists():
+            downloaded = f
+            break
+    if not downloaded:
+        return {"ok": False, "file": None, "error": "No output file found", "size_mb": 0.0}
+
+    thumbnail_path = None
+    for f in temp_dir.glob(f"ripper_standalone_thumb_{tid}.*"):
+        if f.exists():
+            thumbnail_path = f
+            break
+
+    safe_title = sanitize_filename(title)
+    output_file = output_dir / f"{safe_title}.{format.lower()}"
+
+    counter = 1
+    original_output = output_file
+    while output_file.exists():
+        output_file = output_dir / f"{original_output.stem}_{counter}.{format.lower()}"
+        counter += 1
+
+    ffmpeg_cmd = ["ffmpeg", "-y", "-i", str(downloaded)]
+    thumb_input = None
+    if thumbnail_path and thumbnail_path.exists():
+        thumb_input = str(thumbnail_path)
+        ffmpeg_cmd.extend(["-i", thumb_input])
+
+    if format == "FLAC":
+        ffmpeg_cmd.extend(["-q:a", "0", "-c:a", "flac", "-ar", "44100"])
+    elif format == "MP3":
+        ffmpeg_cmd.extend(["-q:a", "0", "-c:a", "libmp3lame", "-ar", "44100"])
+    elif format == "M4A":
+        ffmpeg_cmd.extend(["-c:a", "aac", "-b:a", "256k", "-ar", "44100"])
+
+    ffmpeg_cmd.extend(["-metadata", f"title={title}", "-metadata", f"artist={artist}"])
+    if album:
+        ffmpeg_cmd.extend(["-metadata", f"album={album}"])
+    if track:
+        ffmpeg_cmd.extend(["-metadata", f"track={track}"])
+
+    if thumb_input:
+        ffmpeg_cmd.extend(["-map", "0", "-map", "1", "-c", "copy", "-c:v", "mjpeg",
+                           "-disposition:v:0", "attached_pic"])
+
+    ffmpeg_cmd.append(str(output_file))
+
+    result = subprocess.run(ffmpeg_cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        return {"ok": False, "file": None, "error": result.stderr[:500], "size_mb": 0.0}
+
+    downloaded.unlink(missing_ok=True)
+    if thumb_input:
+        Path(thumb_input).unlink(missing_ok=True)
+
+    registry[url] = output_file.name
+    save_registry(registry)
+
+    size_mb = output_file.stat().st_size / (1024 * 1024)
+    logger.info("Saved %s (%.1f MB) from %s", output_file.name, size_mb, url)
+    return {"ok": True, "file": output_file, "error": None, "size_mb": size_mb}
+
+
+def _fetch_playlist_entries(playlist_url: str) -> list[dict]:
+    """Fetch playlist video entries without downloading.
+
+    Returns a list of dicts with keys: index, title, url, id.
+    """
+    import yt_dlp
+
+    ydl_opts = {"quiet": True, "no_warnings": True, "extract_flat": True}
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(playlist_url, download=False)
+
+    entries = info.get("entries", []) or []
+    results = []
+    for i, entry in enumerate(entries):
+        if not entry:
+            continue
+        vid = entry.get("id", "")
+        results.append({
+            "index": i,
+            "title": entry.get("title", f"Video {i+1}"),
+            "url": entry.get("url", f"https://www.youtube.com/watch?v={vid}"),
+            "id": vid,
+        })
+    return results
+
+
 # ── Playlist dialog ────────────────────────────────────────────────────
 class PlaylistDialog(simpledialog.Dialog):
     """Modal dialog listing playlist videos for selection."""

@@ -20,6 +20,7 @@ from rip_gui import (  # noqa: E402
     sanitize_filename,
     validate_youtube_url,
     validate_urls,
+    is_already_downloaded,
 )
 
 
@@ -97,7 +98,7 @@ def test_validate_urls_too_many():
     "title,expected",
     [
         ("Normal Song Title", "Normal Song Title"),
-        ('Song<>:"/\|?*', "Song"),
+        (r'Song<>:"\|?*', "Song"),
         ("   Multiple   Spaces   ", "Multiple Spaces"),
         ("A" * 100, "A" * 80),  # truncated to 80 chars
         ("", "Unknown_Track"),
@@ -111,7 +112,7 @@ def test_sanitize_filename(title, expected):
 
 
 def test_sanitize_filename_removes_invalid_chars():
-    result = sanitize_filename('test<>:"/\|?*file')
+    result = sanitize_filename(r'test<>:"\|?*file')
     assert "<" not in result
     assert ">" not in result
     assert ":" not in result
@@ -137,8 +138,6 @@ def test_registry_save_and_load_roundtrip(tmp_path):
 
 
 def test_is_already_downloaded_returns_none_for_missing_url():
-    from rip_gui import is_already_downloaded
-
     registry = {}
     result = is_already_downloaded("https://example.com/new", registry)
     assert result is None
@@ -161,7 +160,7 @@ def test_is_already_downloaded_returns_filename_for_existing(tmp_path, monkeypat
         lambda: {"output_dir": str(output_dir)},
     )
 
-    result = rip_gui.is_already_downloaded("https://example.com/video1", registry)
+    result = is_already_downloaded("https://example.com/video1", registry)
     assert result == "Song One.flac"
 
 
@@ -177,5 +176,5 @@ def test_is_already_downloaded_returns_none_when_file_missing(tmp_path, monkeypa
         lambda: {"output_dir": str(tmp_path / "output")},
     )
 
-    result = rip_gui.is_already_downloaded("https://example.com/video1", registry)
+    result = is_already_downloaded("https://example.com/video1", registry)
     assert result is None

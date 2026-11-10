@@ -5,6 +5,27 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.0] - 2026-11-10
+
+### Added
+
+- **Phase 6 — Testing & CI.** Integration tests (`tests/test_integration.py`)
+  for end-to-end download → convert → cover-art embedding against real
+  YouTube URLs, gated behind `--run-integration`. Performance benchmark
+  script (`scripts/benchmark_downloads.py`) measuring concurrent download
+  throughput vs. worker count. CI gains coverage reporting (`pytest-cov` +
+  Codecov) and optional workflow-dispatch jobs for integration and
+  benchmark runs.
+- **Standalone `rip_single_url()` helper** — download, convert, embed
+  metadata and cover art without the GUI, usable from scripts and tests.
+- **Standalone `_fetch_playlist_entries()` helper** — resolve playlist
+  URLs to individual video URLs without downloading.
+
+### Changed
+
+- `CURRENT_VERSION` bumped to `2.1.0`.
+- CI `test` job now runs with `--cov=rip_gui` and uploads to Codecov.
+
 ## [1.0.0]  -  2026-10-20
 
 ### Added
