@@ -24,6 +24,16 @@ FLAC, and names the file after the video title rather than a running number.
   for the filesystem
 - **Batch friendly**  -  no more `001.flac` overwriting `001.flac`
 
+## Screenshots
+
+<p align="center"><b>Main Menu</b></p>
+
+<p align="center">
+  <img src="assets/screenshots/main-menu.png" alt="YouTube Audio Ripper — Main Menu" width="700">
+</p>
+
+---
+
 ## Requirements
 
 - Python 3.11+
