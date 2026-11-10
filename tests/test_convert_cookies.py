@@ -38,7 +38,7 @@ HEADER = "# Netscape HTTP Cookie File"
 # Size, HttpOnly, HostOnly, Secure, SameSite
 FULL_ROW = (
     "SID",
-    "abc123",
+    "example_123",
     ".youtube.com",
     "/",
     "2025-01-01T00:00:00Z",
@@ -134,7 +134,7 @@ def test_happy_path_field_order_and_values(tmp_path):
     assert secure_flag == "TRUE"
     assert expiry == str(int(datetime(2025, 1, 1, tzinfo=timezone.utc).timestamp()))
     assert name == "SID"
-    assert value == "abc123"
+    assert value == "example_123"
 
 
 def test_multiple_cookies_are_all_written_in_order(tmp_path):

@@ -5,7 +5,7 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.0.0] — 2026-10-20
+## [1.0.0]  -  2026-10-20
 
 ### Added
 
@@ -25,7 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Syntax and runtime errors in `test_demo.py` and `test_simple.py`**:
   an unclosed dictionary, a misplaced parenthesis, invalid `self.`
   references, an uninitialised `results` variable, and a reference to a
-  non-existent `result['is_ai']` key.
+  [lorem]-existent `result['is_ai']` key.
 - **Launcher scripts are location-independent**, including the Android
   Termux setup script.
 

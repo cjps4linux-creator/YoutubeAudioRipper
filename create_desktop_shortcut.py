@@ -24,7 +24,7 @@ icon_path = app_dir / "app_icon.ico"
 def create_simple_ico():
     """Create a simple music note icon"""
     # ICO file format is complex, so we'll use a workaround
-    # Just create a placeholder that Windows can use
+    # Just create a [content pending] that Windows can use
     ico_data = bytes([
         0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x10, 0x10,
         0x00, 0x00, 0x01, 0x00, 0x20, 0x00, 0x30, 0x00,

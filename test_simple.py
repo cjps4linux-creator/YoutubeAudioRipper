@@ -30,7 +30,7 @@ def test_gui():
     
     input_label = ctk.CTkLabel(
         input_frame,
-        text=f"YouTube URL(s) — paste one or more (one per line):\n{test_url}",
+        text=f"YouTube URL(s)  -  paste one or more (one per line):\n{test_url}",
         font=ctk.CTkFont(size=12, weight="bold")
     )
     input_label.pack(anchor="w", padx=15, pady=(12, 5))

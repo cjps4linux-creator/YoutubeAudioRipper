@@ -18,11 +18,11 @@
 A desktop app that downloads the audio from a YouTube link, converts it to
 FLAC, and names the file after the video title rather than a running number.
 
-- **Paste-and-go GUI** — CustomTkinter, no command line
-- **FLAC output** — with metadata preserved
-- **Smart filenames** — `Rick Astley - Never Gonna Give You Up.flac`, sanitised
+- **Paste-and-go GUI**  -  CustomTkinter, no command line
+- **FLAC output**  -  with metadata preserved
+- **Smart filenames**  -  `Rick Astley - Never Gonna Give You Up.flac`, sanitised
   for the filesystem
-- **Batch friendly** — no more `001.flac` overwriting `001.flac`
+- **Batch friendly**  -  no more `001.flac` overwriting `001.flac`
 
 ## Requirements
 
@@ -48,7 +48,7 @@ Or double-click `launch.vbs` / `launch.bat` on Windows.
 ## Authentication
 
 YouTube increasingly requires a signed-in session. When a download fails with
-`Sign in to confirm you're not a bot`, the app needs browser cookies — it
+`Sign in to confirm you're not a bot`, the app needs browser cookies  -  it
 supports `--cookies-from-browser`:
 
 ```bash
@@ -64,12 +64,12 @@ of Service and applicable copyright law in your jurisdiction.
 
 ## Licence
 
-MIT — see [LICENSE](LICENSE).
+MIT  -  see [LICENSE](LICENSE).
 
 ---
 
 ## Credits
 
-Built by **Conrad CJ Wilson** — [GitHub](https://github.com/cjps4linux-creator) · [LinkedIn](https://linkedin.com/in/conradcjwilson)
+Built by **Conrad CJ Wilson**  -  [GitHub](https://github.com/cjps4linux-creator) · [LinkedIn](https://linkedin.com/in/conradcjwilson)
 
 `conradcjwilson0@gmail.com`

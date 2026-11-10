@@ -20,7 +20,7 @@
 
 ### URL Input Section
 - **Container**: CTkFrame with background color
-- **Label**: "YouTube URL(s) — paste one or more (one per line):" (12pt, bold)
+- **Label**: "YouTube URL(s)  -  paste one or more (one per line):" (12pt, bold)
 - **Text Area**: CTkTextbox, height=100, Consolas 11pt, no wrap
 - **Hint**: "💡 Tip: Paste URLs directly (Ctrl+V) or enter one per line" (10pt, gray)
 
@@ -34,7 +34,7 @@
 ### Progress Section
 - **Container**: CTkFrame with background
 - **Header**: "Progress" (12pt, bold)
-- **Progress Bar**: CTkProgressBar, full width
+- **Progress sample**: CTkProgressBar, full width
 - **Status Label**: Dynamic text (10pt, gray)
 
 ### Log Section
