@@ -10,9 +10,11 @@ permissions:
   contents: write
 
 jobs:
-  build:
+  # ── Windows build ────────────────────────────────────────────────────
+  build-windows:
     runs-on: windows-latest
-
+    outputs:
+      artifact_name: ${{ steps.asset-name.outputs.name }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -25,7 +27,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install customtkinter yt-dlp pyinstaller pystray
+          pip install customtkinter yt-dlp pyinstaller pystray pillow
 
       - name: Verify source compiles
         run: |
@@ -46,7 +48,6 @@ jobs:
       - name: Bundle FFmpeg
         shell: pwsh
         run: |
-          # Download FFmpeg static build for Windows
           $ffmpegZip = Join-Path $env:TEMP "ffmpeg.zip"
           Invoke-WebRequest -Uri "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip" -OutFile $ffmpegZip
           Expand-Archive -Path $ffmpegZip -DestinationPath $env:TEMP
@@ -61,12 +62,155 @@ jobs:
           Compress-Archive -Path "dist/YouTube Audio Ripper/*" -DestinationPath "YouTube-Audio-Ripper-${{ github.ref_name }}-win64.zip"
           Write-Host "Release zip created"
 
+      - name: Set artifact name
+        id: asset-name
+        run: echo "name=YouTube-Audio-Ripper-${{ github.ref_name }}-win64.zip" >> $GITHUB_OUTPUT
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: win64-asset
+          path: "YouTube-Audio-Ripper-${{ github.ref_name }}-win64.zip"
+
+  # ── macOS build ──────────────────────────────────────────────────────
+  build-macos:
+    runs-on: macos-latest
+    outputs:
+      artifact_name: ${{ steps.asset-name.outputs.name }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install customtkinter yt-dlp pyinstaller pystray pillow
+
+      - name: Install FFmpeg (macOS)
+        run: |
+          brew install ffmpeg
+
+      - name: Verify source compiles
+        run: |
+          python -m py_compile rip_gui.py android/ripper_server.py launch_app.py
+          python -m ruff check rip_gui.py android/ripper_server.py launch_app.py
+
+      - name: Run unit tests
+        run: |
+          pip install pytest
+          pytest -q tests/
+
+      - name: Build standalone app (PyInstaller)
+        run: |
+          python -m PyInstaller rip_gui.py --noconfirm --clean --windowed \
+            --name "YouTube Audio Ripper" \
+            --add-data "android/static:android/static"
+
+      - name: Create release tar.gz
+        run: |
+          tar -czf "YouTube-Audio-Ripper-${{ github.ref_name }}-macos.tar.gz" -C "dist" "YouTube Audio Ripper.app"
+
+      - name: Set artifact name
+        id: asset-name
+        run: echo "name=YouTube-Audio-Ripper-${{ github.ref_name }}-macos.tar.gz" >> $GITHUB_OUTPUT
+
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-asset
+          path: "YouTube-Audio-Ripper-${{ github.ref_name }}-macos.tar.gz"
+
+  # ── Linux build ──────────────────────────────────────────────────────
+  build-linux:
+    runs-on: ubuntu-latest
+    outputs:
+      artifact_name: ${{ steps.asset-name.outputs.name }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y ffmpeg xvfb libgl1-mesa-glx libglib2.0-0 libsm6 libxext6 libxrender1 libfreetype6 libfontconfig1
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install customtkinter yt-dlp pyinstaller pystray pillow
+
+      - name: Verify source compiles
+        run: |
+          python -m py_compile rip_gui.py android/ripper_server.py launch_app.py
+          python -m ruff check rip_gui.py android/ripper_server.py launch_app.py
+
+      - name: Run unit tests
+        run: |
+          pip install pytest
+          pytest -q tests/
+
+      - name: Build standalone binary (PyInstaller)
+        run: |
+          xvfb-run -a python -m PyInstaller rip_gui.py --noconfirm --clean --windowed \
+            --name "YouTube Audio Ripper" \
+            --add-data "android/static:android/static"
+
+      - name: Create release tar.gz
+        run: |
+          tar -czf "YouTube-Audio-Ripper-${{ github.ref_name }}-linux.tar.gz" -C "dist" "YouTube Audio Ripper"
+
+      - name: Set artifact name
+        id: asset-name
+        run: echo "name=YouTube-Audio-Ripper-${{ github.ref_name }}-linux.tar.gz" >> $GITHUB_OUTPUT
+
+      - name: Upload Linux artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-asset
+          path: "YouTube-Audio-Ripper-${{ github.ref_name }}-linux.tar.gz"
+
+  # ── Create GitHub Release ────────────────────────────────────────────
+  release:
+    needs: [build-windows, build-macos, build-linux]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download Windows asset
+        uses: actions/download-artifact@v4
+        with:
+          name: win64-asset
+          path: ./assets
+
+      - name: Download macOS asset
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-asset
+          path: ./assets
+
+      - name: Download Linux asset
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-asset
+          path: ./assets
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
           name: "YouTube Audio Ripper ${{ github.ref_name }}"
-          files: "YouTube-Audio-Ripper-${{ github.ref_name }}-win64.zip"
+          files: ./assets/*
           draft: false
           prerelease: false
           generate_release_notes: true

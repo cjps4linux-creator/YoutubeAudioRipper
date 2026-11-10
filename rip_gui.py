@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-YouTube Audio Ripper - Production-Grade Scaled Version (Phase 4)
+YouTube Audio Ripper - Production-Grade UX-Enhanced Version (Phase 7)
 Paste a YouTube link, get a FLAC named after the track. Local GUI, no account needed.
 
 Phase 1 — Stabilise: class name fix, logging module, FFmpeg pre-flight check,
@@ -16,9 +16,20 @@ installer roadmap.
 
 Phase 4 — Scale: parallel downloads (thread pool), playlist support,
 cover art extraction, bandwidth limiting, proxy support.
+
+Phase 5 — Release & Distribution: unit tests, GitHub Actions CI,
+Inno Setup installer script, system tray support.
+
+Phase 6 — Testing & CI: integration tests, performance benchmark,
+coverage reporting, standalone rip_single_url() helper.
+
+Phase 7 — UX Enhancements: download history UI, dark/light theme toggle,
+keyboard shortcuts, portable mode, auto-updater client, enhanced tray.
 """
 
 import concurrent.futures
+import csv
+import datetime as _dt
 import json
 import logging
 import logging.handlers
@@ -34,7 +45,7 @@ import urllib.request
 from pathlib import Path
 
 import customtkinter as ctk
-from tkinter import simpledialog
+from tkinter import simpledialog, messagebox
 
 # ── Configuration ──────────────────────────────────────────────────────
 APP_DIR = Path(__file__).parent.resolve()
@@ -49,9 +60,28 @@ MAX_DOWNLOAD_RETRIES = 3
 RETRY_BASE_DELAY = 1.0  # seconds
 DEFAULT_MAX_WORKERS = 3
 
+# ── Portable mode ──────────────────────────────────────────────────────
+# If a file named ``portable`` (no extension) exists next to the EXE/script,
+# all state (settings, registry, history, logs) is written to the app
+# directory instead of AppData. This allows running from a USB stick.
+PORTABLE_FILE = APP_DIR / "portable"
+PORTABLE_MODE = PORTABLE_FILE.exists()
+
+if PORTABLE_MODE:
+    # All state lives next to the executable
+    SETTINGS_FILE = APP_DIR / "settings.json"
+    LOG_FILE = APP_DIR / "youtube_ripper.log"
+    DOWNLOADS_REGISTRY = APP_DIR / "downloads.json"
+    HISTORY_FILE = APP_DIR / "download_history.json"
+else:
+    SETTINGS_FILE = APP_DIR / "settings.json"
+    LOG_FILE = APP_DIR / "youtube_ripper.log"
+    DOWNLOADS_REGISTRY = APP_DIR / "downloads.json"
+    HISTORY_FILE = APP_DIR / "download_history.json"
+
 GITHUB_REPO = "cjps4linux-creator/youtube-audio-ripper"
 GITHUB_API_LATEST = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
-CURRENT_VERSION = "2.1.0"
+CURRENT_VERSION = "2.2.0"
 
 YOUTUBE_URL_RE = re.compile(
     r"^https?://(?:www\.)?(?:youtube\.com/watch\?v=|youtu\.be/)[\w-]{11}(?:[?&].*)?$",
@@ -84,6 +114,10 @@ DEFAULT_SETTINGS = {
     "proxy_url": "",
     "embed_cover_art": True,
     "playlist_mode": False,
+    "theme": "dark",  # "dark", "light", "system"
+    "show_history_panel": False,
+    "check_updates_on_startup": True,
+    "skip_update_version": "",  # version to skip
 }
 
 ctk.set_appearance_mode("dark")
@@ -268,6 +302,61 @@ def is_already_downloaded(url: str, registry: dict[str, str]) -> str | None:
     return None
 
 
+# ── Download history ───────────────────────────────────────────────────
+
+
+def load_history() -> list[dict]:
+    """Load the download history list from disk."""
+    try:
+        data = json.loads(HISTORY_FILE.read_text(encoding="utf-8"))
+        if isinstance(data, list):
+            return data
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        pass
+    return []
+
+
+def save_history(history: list[dict]) -> None:
+    """Persist the download history to disk (keeps last 500 entries)."""
+    try:
+        # Keep only the most recent 500 entries
+        trimmed = history[-500:]
+        HISTORY_FILE.write_text(
+            json.dumps(trimmed, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+    except OSError as exc:
+        logger.warning("Could not save download history: %s", exc)
+
+
+def add_history_entry(url: str, title: str, filename: str, format: str, size_mb: float) -> None:
+    """Append a completed download to the history."""
+    history = load_history()
+    entry = {
+        "url": url,
+        "title": title,
+        "filename": filename,
+        "format": format,
+        "size_mb": round(size_mb, 2),
+        "downloaded_at": _dt.datetime.now().isoformat(),
+    }
+    history.append(entry)
+    save_history(history)
+
+
+def export_history_csv(path: Path) -> None:
+    """Export download history to a CSV file."""
+    history = load_history()
+    with path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(
+            f,
+            fieldnames=["downloaded_at", "title", "url", "filename", "format", "size_mb"],
+        )
+        writer.writeheader()
+        for entry in history:
+            writer.writerow(entry)
+
+
 # ── Retry with exponential backoff ─────────────────────────────────────
 def retry_download(func, *args, max_retries: int = MAX_DOWNLOAD_RETRIES,
                    base_delay: float = RETRY_BASE_DELAY, **kwargs):
@@ -432,6 +521,7 @@ def rip_single_url(url: str, output_dir: Path, format: str = "FLAC") -> dict:
     save_registry(registry)
 
     size_mb = output_file.stat().st_size / (1024 * 1024)
+    add_history_entry(url, title, output_file.name, format, size_mb)
     logger.info("Saved %s (%.1f MB) from %s", output_file.name, size_mb, url)
     return {"ok": True, "file": output_file, "error": None, "size_mb": size_mb}
 
@@ -524,16 +614,43 @@ class YouTubeRipperApp(ctk.CTk):
 
         self.settings = load_settings()
         self.downloads_registry = load_registry()
+        self.download_history = load_history()
         self.processing = False
         self.current_job = 0
         self.total_jobs = 0
         self.completed_jobs = 0
         self._stop_requested = False
+        self._tray_icon = None
         self._build_ui()
+
+        # Apply saved theme
+        theme = self.settings.get("theme", "dark")
+        ctk.set_appearance_mode(theme)
+
+        # Show history panel if setting enabled
+        if self.settings.get("show_history_panel", False):
+            self.after(200, self._toggle_history_panel)
+
+        # Keyboard shortcuts
+        self.bind_all("<Control-v>", lambda e: self._paste_urls())
+        self.bind_all("<Control-Return>", lambda e: self._start_rip())
+        self.bind_all("<Control-s>", lambda e: self._save_settings())
+        self.bind_all("<Control-o>", lambda e: self._browse_output_dir())
+        self.bind_all("<Escape>", lambda e: self._request_stop() if self.processing else None)
+        self.bind_all("<Control-h>", lambda e: self._toggle_history_panel())
+        self.bind_all("<F1>", lambda e: self._show_about())
+
+        # Show portable mode notice if applicable
+        if PORTABLE_MODE:
+            self._gui_log("💾 Portable mode detected — all state stored locally")
 
         # Run pre-flight + update check after UI is built
         self.after(100, self._pre_flight_check)
-        self.after(1500, self._check_updates)
+        if self.settings.get("check_updates_on_startup", True):
+            skip_ver = self.settings.get("skip_update_version", "")
+            self.after(1500, lambda: self._check_updates_prompt(skip_ver))
+        else:
+            self.after(1500, self._check_updates)
 
     # ── UI Construction ──────────────────────────────────────────────
     def _build_ui(self):
@@ -700,6 +817,43 @@ class YouTubeRipperApp(ctk.CTk):
         self.ai_value_label = ctk.CTkLabel(ai_row, text=f"{self.settings.get('ai_sensitivity_threshold', 0.7):.1f}", width=40)
         self.ai_value_label.pack(side="left")
 
+        theme_row = ctk.CTkFrame(self.settings_frame, fg_color="transparent")
+        theme_row.pack(fill="x", padx=10, pady=5)
+        ctk.CTkLabel(theme_row, text="Appearance Theme:", width=140).pack(side="left")
+        self.theme_var = ctk.StringVar(value=self.settings.get("theme", "dark"))
+        self.theme_dropdown = ctk.CTkOptionMenu(
+            theme_row, values=["dark", "light", "system"], variable=self.theme_var,
+            width=110, font=ctk.CTkFont(size=11), command=lambda v: self._apply_theme(),
+        )
+        self.theme_dropdown.pack(side="left", padx=(10, 0))
+
+        history_row = ctk.CTkFrame(self.settings_frame, fg_color="transparent")
+        history_row.pack(fill="x", padx=10, pady=5)
+        self.history_panel_var = ctk.BooleanVar(value=self.settings.get("show_history_panel", False))
+        self.history_panel_checkbox = ctk.CTkCheckBox(
+            history_row, text="Show download history panel on startup",
+            variable=self.history_panel_var, font=ctk.CTkFont(size=11),
+        )
+        self.history_panel_checkbox.pack(side="left")
+
+        updates_row = ctk.CTkFrame(self.settings_frame, fg_color="transparent")
+        updates_row.pack(fill="x", padx=10, pady=5)
+        self.updates_var = ctk.BooleanVar(value=self.settings.get("check_updates_on_startup", True))
+        self.updates_checkbox = ctk.CTkCheckBox(
+            updates_row, text="Check for updates on startup",
+            variable=self.updates_var, font=ctk.CTkFont(size=11),
+        )
+        self.updates_checkbox.pack(side="left")
+
+        if PORTABLE_MODE:
+            portable_row = ctk.CTkFrame(self.settings_frame, fg_color="transparent")
+            portable_row.pack(fill="x", padx=10, pady=5)
+            ctk.CTkLabel(
+                portable_row,
+                text="💾 Portable mode: all state stored next to the executable",
+                font=ctk.CTkFont(size=10), text_color="orange",
+            ).pack(side="left")
+
         ctk.CTkButton(
             self.settings_frame, text="Save Settings", command=self._save_settings,
             width=120,
@@ -762,10 +916,197 @@ class YouTubeRipperApp(ctk.CTk):
         self.settings["proxy_url"] = self.proxy_var.get()
         self.settings["embed_cover_art"] = self.cover_art_var.get()
         self.settings["playlist_mode"] = self.playlist_var.get()
+        self.settings["theme"] = self.theme_var.get()
+        self.settings["show_history_panel"] = self.history_panel_var.get()
+        self.settings["check_updates_on_startup"] = self.updates_var.get()
         save_settings(self.settings)
         Path(self.settings["output_dir"]).mkdir(parents=True, exist_ok=True)
         self._gui_log("✅ Settings saved")
         logger.info("Settings saved: %s", self.settings)
+
+    # ── Keyboard shortcuts & clipboard ─────────────────────────────────
+    def _paste_urls(self):
+        """Paste clipboard contents into the URL text box."""
+        try:
+            clipboard = self.clipboard_get()
+            if clipboard.strip():
+                self.url_text.insert("insert", clipboard + "\n")
+                self._gui_log("📋 Pasted URLs from clipboard")
+        except Exception as exc:
+            self._gui_log(f"❌ Could not paste from clipboard: {exc}")
+
+    # ── Download history panel ─────────────────────────────────────────
+    def _toggle_history_panel(self):
+        """Show or hide the download history panel."""
+        if hasattr(self, "history_frame") and self.history_frame.winfo_exists():
+            if self.history_frame.winfo_viewable():
+                self.history_frame.pack_forget()
+                self.history_panel_var.set(False)
+            else:
+                self.history_frame.pack(fill="x", pady=(0, 10))
+                self.history_panel_var.set(True)
+                self._refresh_history()
+        else:
+            self._build_history_panel()
+            self.history_frame.pack(fill="x", pady=(0, 10))
+            self.history_panel_var.set(True)
+            self._refresh_history()
+
+    def _build_history_panel(self):
+        """Build the download history UI panel."""
+        self.history_frame = ctk.CTkFrame(self.main)
+
+        ctk.CTkLabel(
+            self.history_frame,
+            text="📜 Download History",
+            font=ctk.CTkFont(size=12, weight="bold"),
+        ).pack(anchor="w", padx=10, pady=(10, 5))
+
+        # History scrollable area
+        self.history_list = ctk.CTkScrollableFrame(self.history_frame, height=200)
+        self.history_list.pack(fill="x", padx=10, pady=(0, 10))
+
+        # History action buttons
+        btn_row = ctk.CTkFrame(self.history_frame, fg_color="transparent")
+        btn_row.pack(fill="x", padx=10, pady=(0, 10))
+
+        ctk.CTkButton(
+            btn_row, text="🔄 Re-download Selected", width=140,
+            command=self._redownload_selected_history,
+        ).pack(side="left", padx=(0, 5))
+
+        ctk.CTkButton(
+            btn_row, text="📤 Export CSV", width=100,
+            command=self._export_history,
+        ).pack(side="left", padx=(0, 5))
+
+        ctk.CTkButton(
+            btn_row, text="🗑️ Clear History", width=100, fg_color="red",
+            hover_color="darkred", command=self._clear_history,
+        ).pack(side="left")
+
+        self._refresh_history()
+
+    def _refresh_history(self):
+        """Refresh the history display from self.download_history."""
+        if not hasattr(self, "history_list"):
+            return
+        for widget in self.history_list.winfo_children():
+            widget.destroy()
+
+        if not self.download_history:
+            ctk.CTkLabel(
+                self.history_list,
+                text="No downloads yet.",
+                font=ctk.CTkFont(size=10),
+                text_color="gray",
+            ).pack(anchor="w", padx=5, pady=5)
+            return
+
+        # Show most recent first
+        for entry in reversed(self.download_history[-50:]):
+            row = ctk.CTkFrame(self.history_frame, fg_color="transparent")
+            row.pack(fill="x", padx=5, pady=2)
+
+            ts = entry.get("downloaded_at", "")[:16].replace("T", " ")
+            title = entry.get("title", "Unknown")
+            size_mb = entry.get("size_mb", 0)
+            fmt = entry.get("format", "FLAC")
+
+            info_label = ctk.CTkLabel(
+                row,
+                text=f"{ts}  •  {title[:50]}  ({fmt}, {size_mb:.1f} MB)",
+                font=ctk.CTkFont(size=10),
+                anchor="w",
+            )
+            info_label.pack(side="left", fill="x", expand=True, padx=(0, 10))
+
+            ctk.CTkButton(
+                row, text="Re-download", width=80,
+                command=lambda u=entry.get("url", ""): self._redownload_from_history(u),
+            ).pack(side="left", padx=2)
+
+    def _redownload_from_history(self, url: str):
+        """Re-download a URL from history."""
+        if not url:
+            return
+        self.url_text.delete("0.0", "end")
+        self.url_text.insert("0.0", url)
+        self._gui_log(f"📋 Loaded URL from history: {url[:60]}…")
+        self._start_rip()
+
+    def _redownload_selected_history(self):
+        """Re-download the most recent history entry."""
+        if self.download_history:
+            last = self.download_history[-1]
+            self._redownload_from_history(last.get("url", ""))
+
+    def _export_history(self):
+        """Export download history to a CSV file."""
+        from tkinter import filedialog
+        path = filedialog.asksaveasfilename(
+            defaultextension=".csv",
+            filetypes=[("CSV files", "*.csv")],
+            title="Export download history",
+        )
+        if path:
+            try:
+                export_history_csv(Path(path))
+                self._gui_log(f"📤 History exported to {path}")
+            except Exception as exc:
+                self._gui_log(f"❌ Export failed: {exc}")
+
+    def _clear_history(self):
+        """Clear all download history."""
+        if messagebox.askyesno("Clear History", "Delete all download history entries?"):
+            self.download_history = []
+            save_history([])
+            self._refresh_history()
+            self._gui_log("🗑️ History cleared")
+
+    # ── Theme ──────────────────────────────────────────────────────────
+    def _apply_theme(self):
+        """Apply the selected appearance theme."""
+        theme = self.theme_var.get()
+        ctk.set_appearance_mode(theme)
+        self._gui_log(f"🎨 Theme switched to {theme}")
+
+    # ── Auto-updater prompt ────────────────────────────────────────────
+    def _check_updates_prompt(self, skip_version: str = ""):
+        """Check for updates and show a dialog if a new version is available."""
+        release = check_for_updates()
+        if not release:
+            logger.info("No update available")
+            return
+        new_ver = release["version"]
+        if new_ver == skip_version:
+            return
+        msg = (
+            f"🆕 Update available: v{new_ver} (current v{CURRENT_VERSION})\n\n"
+            f"{release.get('body', '')[:300]}...\n\n"
+            f"Download: {release.get('url', '')}\n\n"
+            f"Do you want to open the download page?"
+        )
+        if messagebox.askyesno("Update Available", msg):
+            import webbrowser
+            webbrowser.open(release.get("url", ""))
+
+    def _skip_this_version(self, version: str):
+        """Mark a version as skipped so it won't prompt again."""
+        self.settings["skip_update_version"] = version
+        save_settings(self.settings)
+
+    # ── About dialog ───────────────────────────────────────────────────
+    def _show_about(self):
+        """Show the about dialog."""
+        msg = (
+            f"YouTube Audio Ripper v{CURRENT_VERSION}\n\n"
+            "Paste a YouTube link, get a FLAC/MP3/M4A with metadata and cover art.\n\n"
+            "Built with customtkinter, yt-dlp, FFmpeg.\n\n"
+            "© 2026 Conrad CJ Wilson\n"
+            "https://github.com/cjps4linux-creator/youtube-audio-ripper"
+        )
+        messagebox.showinfo("About YouTube Audio Ripper", msg)
 
     # ── Pre-flight & updates ─────────────────────────────────────────
     def _pre_flight_check(self):
@@ -1066,7 +1407,11 @@ class YouTubeRipperApp(ctk.CTk):
         self.downloads_registry[url] = output_file.name
         save_registry(self.downloads_registry)
 
+        # ── Add to download history ───────────────────────────────────
         size_mb = output_file.stat().st_size / (1024 * 1024)
+        add_history_entry(url, title, output_file.name, fmt, size_mb)
+        self.download_history = load_history()
+
         self.after(0, self._gui_log, f"✅ Saved: {output_file.name} ({size_mb:.1f} MB)")
         self.after(0, self.file_progress.configure, {"value": 1.0})
         logger.info(

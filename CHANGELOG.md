@@ -5,6 +5,26 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.0] - 2026-11-10
+
+### Added
+
+- **Phase 7 — UX Enhancements.** Download history UI with re-download and
+  CSV export (`tests/test_validation.py` + `tests/test_integration.py`).
+  Dark/Light/System theme toggle. Keyboard shortcuts: Ctrl+V paste,
+  Ctrl+Enter start, Ctrl+S save, Ctrl+O browse, Escape stop,
+  Ctrl+H toggle history, F1 about. Portable mode (state stored next to
+  executable when a `portable` file is present). Auto-updater client
+  that checks GitHub releases on startup and prompts to download.
+- **`add_history_entry()` and `export_history_csv()` helpers** for
+  tracking and exporting download history.
+
+### Changed
+
+- `CURRENT_VERSION` bumped to `2.2.0`.
+- `_download_convert()` and `rip_single_url()` now record every
+  completed download to history.
+
 ## [2.1.0] - 2026-11-10
 
 ### Added

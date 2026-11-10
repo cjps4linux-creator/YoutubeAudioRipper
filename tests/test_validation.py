@@ -178,3 +178,77 @@ def test_is_already_downloaded_returns_none_when_file_missing(tmp_path, monkeypa
 
     result = is_already_downloaded("https://example.com/video1", registry)
     assert result is None
+
+
+# ── Download History Tests ─────────────────────────────────────────────
+
+
+def test_history_save_and_load_roundtrip(tmp_path, monkeypatch):
+    import rip_gui
+
+    history_file = tmp_path / "download_history.json"
+    monkeypatch.setattr(rip_gui, "HISTORY_FILE", history_file)
+
+    history = [
+        {"url": "https://example.com/v1", "title": "Song One", "filename": "Song One.flac",
+         "format": "FLAC", "size_mb": 25.5, "downloaded_at": "2026-01-01T12:00:00"},
+    ]
+
+    rip_gui.save_history(history)
+    loaded = rip_gui.load_history()
+    assert loaded == history
+
+
+def test_add_history_entry(tmp_path, monkeypatch):
+    import rip_gui
+
+    history_file = tmp_path / "download_history.json"
+    monkeypatch.setattr(rip_gui, "HISTORY_FILE", history_file)
+
+    rip_gui.add_history_entry(
+        "https://youtu.be/dQw4w9WgXcQ", "Test Song", "Test Song.flac", "FLAC", 30.0
+    )
+
+    history = rip_gui.load_history()
+    assert len(history) == 1
+    assert history[0]["title"] == "Test Song"
+    assert history[0]["format"] == "FLAC"
+    assert history[0]["size_mb"] == 30.0
+    assert "downloaded_at" in history[0]
+
+
+def test_export_history_csv(tmp_path, monkeypatch):
+    import rip_gui
+
+    history_file = tmp_path / "download_history.json"
+    monkeypatch.setattr(rip_gui, "HISTORY_FILE", history_file)
+
+    rip_gui.add_history_entry(
+        "https://youtu.be/dQw4w9WgXcQ", "Test Song", "Test Song.flac", "FLAC", 30.0
+    )
+
+    csv_path = tmp_path / "history.csv"
+    rip_gui.export_history_csv(csv_path)
+
+    content = csv_path.read_text(encoding="utf-8")
+    assert "Test Song" in content
+    assert "FLAC" in content
+    assert "30.0" in content
+
+
+def test_history_keeps_only_last_500(tmp_path, monkeypatch):
+    import rip_gui
+
+    history_file = tmp_path / "download_history.json"
+    monkeypatch.setattr(rip_gui, "HISTORY_FILE", history_file)
+
+    # Add 501 entries
+    for i in range(501):
+        rip_gui.add_history_entry(
+            f"https://youtu.be/id{i:011d}", f"Song {i}", f"Song {i}.flac", "FLAC", 25.0
+        )
+
+    history = rip_gui.load_history()
+    assert len(history) == 500
+    # The first entry should be gone (index 0 removed)
+    assert history[0]["title"] == "Song 1"
