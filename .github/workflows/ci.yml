@@ -34,8 +34,8 @@ jobs:
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
       - name: Install test dependencies
         run: pip install pytest==8.3.3
-      - name: Run tests
-        run: pytest -q --no-header
+      - name: Run tests (isolated to tests/ directory)
+        run: pytest -q tests/ --no-header -p no:cacheprovider
 
   docs-check:
     runs-on: ubuntu-latest

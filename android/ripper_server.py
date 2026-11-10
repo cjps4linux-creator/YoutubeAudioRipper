@@ -115,7 +115,7 @@ def _run_ytdlp(url: str, job_id: str, fmt: str = "flac", quality: str = "best"):
 
     # Convert
     ext = fmt.lower()
-    safe_title = re.sub(r'[<>:"/\\|?*]', '', title.strip())[:80] or f"track_{job_id}"
+    safe_title = re.sub(r'[<>:\"/\\|?*]', '', title.strip())[:80] or f"track_{job_id}"
     output_file = MUSIC_DIR / f"{safe_title}.{ext}"
 
     counter = 1
@@ -169,14 +169,14 @@ def _run_ytdlp(url: str, job_id: str, fmt: str = "flac", quality: str = "best"):
 
 # ── Job API helpers ────────────────────────────────────────────────────
 def _make_job(url: str, fmt: str = "flac", quality: str = "best"):
-    job_id = f"{int(time.time()*1000)}_{threading.get_native_id()}"
+    job_id = f"{int(time.time() * 1000)}_{threading.get_native_id()}"
     logs = []
 
     def _log(msg):
         logs.append({"t": datetime.now().isoformat(), "m": msg})
 
     job = {
-        "[lorem]": job_id,
+        "job_id": job_id,
         "url": url,
         "format": fmt,
         "quality": quality,
@@ -417,11 +417,11 @@ label { display: block; font-size: 0.78em; font-weight: 600; color: var(--muted)
   </div>
   <div class="card">
     <label>YouTube URL</label>
-    <textarea [lorem]="urlInput" class="url-area" [content pending]="Paste YouTube URL here..."></textarea>
+    <textarea id="urlInput" class="url-area" placeholder="Paste YouTube URL here..."></textarea>
     <div class="controls">
       <div>
         <label>Format</label>
-        <select [lorem]="formatSelect">
+        <select id="formatSelect">
           <option value="flac" selected>FLAC (Lossless)</option>
           <option value="mp3">MP3 (320kbps)</option>
           <option value="m4a">M4A (AAC)</option>
@@ -429,28 +429,28 @@ label { display: block; font-size: 0.78em; font-weight: 600; color: var(--muted)
       </div>
       <div>
         <label>Quality</label>
-        <select [lorem]="qualitySelect">
+        <select id="qualitySelect">
           <option value="best" selected>Best Available</option>
           <option value="worst">Smallest File</option>
         </select>
       </div>
     </div>
-    <button [lorem]="ripBtn" class="btn btn-primary">DOWNLOAD AUDIO</button>
-    <div class="progress-wrap" [lorem]="progressWrap" style="display:none">
-      <div class="progress-sample"><div class="progress-fill" [lorem]="progressFill"></div></div>
+    <button id="ripBtn" class="btn btn-primary">DOWNLOAD AUDIO</button>
+    <div class="progress-wrap" id="progressWrap" style="display:none">
+      <div class="progress-sample"><div class="progress-fill" id="progressFill"></div></div>
       <div class="status-line">
-        <span [lorem]="statusText">Ready</span>
-        <span [lorem]="progressPct">0%</span>
+        <span id="statusText">Ready</span>
+        <span id="progressPct">0%</span>
       </div>
     </div>
-    <div class="log-area" [lorem]="logArea"></div>
+    <div class="log-area" id="logArea"></div>
   </div>
   <div class="section-title">Downloaded Files</div>
-  <div [lorem]="filesList"></div>
+  <div id="filesList"></div>
 </div>
-<div class="toast" [lorem]="toast"></div>
+<div class="toast" id="toast"></div>
 <script>
-const $ = [lorem] => document.getElementById([lorem]);
+const $ = (id) => document.getElementById(id);
 const api = window.location.origin;
 function toast(msg) {
   const t = $("toast");
@@ -564,7 +564,7 @@ class RipperHandler(http.server.BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Origin", "http://localhost:8080")
         self.end_headers()
         self.wfile.write(body)
 
@@ -613,6 +613,10 @@ class RipperHandler(http.server.BaseHTTPRequestHandler):
 
         if path.startswith("/download/"):
             fname = urllib.parse.unquote(path[len("/download/"):])
+            # Path traversal protection: only allow basename
+            if "/" in fname or "\\" in fname or ".." in fname:
+                self.send_error(400, "Invalid filename")
+                return
             fpath = MUSIC_DIR / fname
             if fpath.exists() and fpath.is_file():
                 ct = "audio/flac" if fpath.suffix == ".flac" else "audio/mpeg" if fpath.suffix == ".mp3" else "audio/mp4"
@@ -631,7 +635,7 @@ class RipperHandler(http.server.BaseHTTPRequestHandler):
             self.send_header("Content-Type", "text/event-stream")
             self.send_header("Cache-Control", "no-cache")
             self.send_header("Connection", "keep-alive")
-            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Access-Control-Allow-Origin", "http://localhost:8080")
             self.end_headers()
 
             try:
@@ -639,7 +643,7 @@ class RipperHandler(http.server.BaseHTTPRequestHandler):
                     with _lock:
                         logs = list(job["logs"])
                     payload = {
-                        "[lorem]": job_id,
+                        "job_id": job_id,
                         "status": job["status"],
                         "status_text": job["status_text"],
                         "progress": job["progress"],
@@ -685,6 +689,10 @@ class RipperHandler(http.server.BaseHTTPRequestHandler):
 
         if path.startswith("/delete/"):
             fname = urllib.parse.unquote(path[len("/delete/"):])
+            # Path traversal protection
+            if "/" in fname or "\\" in fname or ".." in fname:
+                self._send_json({"error": "invalid filename"}, 400)
+                return
             fpath = MUSIC_DIR / fname
             if fpath.exists():
                 fpath.unlink()
@@ -697,7 +705,7 @@ class RipperHandler(http.server.BaseHTTPRequestHandler):
 
     def do_OPTIONS(self):
         self.send_response(204)
-        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Origin", "http://localhost:8080")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.end_headers()

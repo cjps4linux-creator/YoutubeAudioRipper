@@ -208,11 +208,11 @@ label { display: block; font-size: 0.78em; font-weight: 600; color: var(--muted)
   </div>
   <div class="card">
     <label>YouTube URL</label>
-    <textarea [lorem]="urlInput" class="url-area" [content pending]="Paste YouTube URL here..."></textarea>
+    <textarea id="urlInput" class="url-area" placeholder="Paste YouTube URL here..."></textarea>
     <div class="controls">
       <div>
         <label>Format</label>
-        <select [lorem]="formatSelect">
+        <select id="formatSelect">
           <option value="flac" selected>FLAC (Lossless)</option>
           <option value="mp3">MP3 (320kbps)</option>
           <option value="m4a">M4A (AAC)</option>
@@ -220,28 +220,28 @@ label { display: block; font-size: 0.78em; font-weight: 600; color: var(--muted)
       </div>
       <div>
         <label>Quality</label>
-        <select [lorem]="qualitySelect">
+        <select id="qualitySelect">
           <option value="best" selected>Best Available</option>
           <option value="worst">Smallest File</option>
         </select>
       </div>
     </div>
-    <button [lorem]="ripBtn" class="btn btn-primary">DOWNLOAD AUDIO</button>
-    <div class="progress-wrap" [lorem]="progressWrap" style="display:none">
-      <div class="progress-sample"><div class="progress-fill" [lorem]="progressFill"></div></div>
+    <button id="ripBtn" class="btn btn-primary">DOWNLOAD AUDIO</button>
+    <div class="progress-wrap" id="progressWrap" style="display:none">
+      <div class="progress-sample"><div class="progress-fill" id="progressFill"></div></div>
       <div class="status-line">
-        <span [lorem]="statusText">Ready</span>
-        <span [lorem]="progressPct">0%</span>
+        <span id="statusText">Ready</span>
+        <span id="progressPct">0%</span>
       </div>
     </div>
-    <div class="log-area" [lorem]="logArea"></div>
+    <div class="log-area" id="logArea"></div>
   </div>
   <div class="section-title">Downloaded Files</div>
-  <div [lorem]="filesList"></div>
+  <div id="filesList"></div>
 </div>
-<div class="toast" [lorem]="toast"></div>
+<div class="toast" id="toast"></div>
 <script>
-const $ = [lorem] => document.getElementById([lorem]);
+const $ = (id) => document.getElementById(id);
 const api = window.location.origin;
 function toast(msg) {
   const t = $("toast");
