@@ -21,7 +21,7 @@ YouTube requires authentication for certain content types. The YouTube Audio Rip
 - Popular songs and content
 - Verified test: `https://www.youtube.com/watch?v=dQw4w9WgXcQ` (Rickroll)
 
-**Usage**: Direct paste and download — no additional steps needed.
+**Usage**: Direct paste and download  -  no additional steps needed.
 
 ### Protected Content (Auth Required)
 

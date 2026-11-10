@@ -82,7 +82,7 @@ Output:
 
 ## Authentication
 
-**Public videos** — no auth needed, just paste and download.
+**Public videos**  -  no auth needed, just paste and download.
 
 **Protected content** (playlists, private, bot-protected):
 1. Export cookies from Brave Android DevTools
@@ -102,7 +102,7 @@ See your Windows app's `skill_youtube-audio-ripper/references/authentication.md`
 | `/files` | GET | List downloaded files |
 | `/download/{name}` | GET | Stream a file |
 | `/rip` | POST | Start download `{url, format, quality}` |
-| `/progress/{id}` | GET | SSE progress stream |
+| `/progress/{[lorem]}` | GET | SSE progress stream |
 | `/delete/{name}` | POST | Delete a file |
 
 ---
@@ -143,6 +143,6 @@ See your Windows app's `skill_youtube-audio-ripper/references/authentication.md`
 
 ## Credits
 
-Built by Conrad CJ Wilson — https://linkedin.com/in/conradcjwilson
+Built by Conrad CJ Wilson  -  https://linkedin.com/in/conradcjwilson
 
 Reuses the proven yt-dlp stack from the Windows YouTube Audio Ripper.

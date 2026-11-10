@@ -21,7 +21,7 @@ cd path\to\youtube-audio-ripper
 - **FLAC Conversion**: Lossless audio format with metadata preservation
 - **AI Voice Detection**: Spectral analysis (spectral flatness + ZCR) detects AI vs Human vocals
 - **Smart Naming**: `001.flac` (human) or `AI_001.flac` (AI-detected)
-- **Real-Time Progress**: Progress bar with detailed logging
+- **Real-Time Progress**: Progress sample with detailed logging
 - **Silent Launcher**: VBS launches without console window
 
 ## File Structure
@@ -91,7 +91,7 @@ path\to\youtube-audio-ripper\
 
 4. **Click "START RIPPING"**:
    - App downloads and processes each URL
-   - Progress bar shows status
+   - Progress sample shows status
    - Log shows track-by-track results
 
 5. **Access results**:
