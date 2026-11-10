@@ -42,6 +42,8 @@ import tempfile
 import threading
 import time
 import urllib.request
+import webbrowser
+import zipfile
 from pathlib import Path
 
 import customtkinter as ctk
@@ -81,7 +83,7 @@ else:
 
 GITHUB_REPO = "cjps4linux-creator/youtube-audio-ripper"
 GITHUB_API_LATEST = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
-CURRENT_VERSION = "2.2.0"
+CURRENT_VERSION = "2.3.0"
 
 YOUTUBE_URL_RE = re.compile(
     r"^https?://(?:www\.)?(?:youtube\.com/watch\?v=|youtu\.be/)[\w-]{11}(?:[?&].*)?$",
@@ -1081,15 +1083,140 @@ class YouTubeRipperApp(ctk.CTk):
         new_ver = release["version"]
         if new_ver == skip_version:
             return
+
+        asset_name = self._update_asset_name(new_ver)
+        download_url = self._find_asset_url(release, asset_name)
+
         msg = (
             f"🆕 Update available: v{new_ver} (current v{CURRENT_VERSION})\n\n"
             f"{release.get('body', '')[:300]}...\n\n"
-            f"Download: {release.get('url', '')}\n\n"
-            f"Do you want to open the download page?"
         )
-        if messagebox.askyesno("Update Available", msg):
-            import webbrowser
+        if download_url:
+            msg += f"Download asset: {asset_name}\n\n"
+        msg += "Choose an option:"
+
+        result = messagebox.askquestion(
+            "Update Available",
+            msg,
+            icon="question",
+            type=messagebox.YESNOCANCEL,
+        )
+        # askquestion returns 'yes', 'no', or 'cancel'
+        if result == "yes":
+            if download_url:
+                self._download_and_install_update(new_ver, download_url)
+            else:
+                webbrowser.open(release.get("url", ""))
+        elif result == "no":
             webbrowser.open(release.get("url", ""))
+        # cancel = skip this version (do nothing)
+
+    def _update_asset_name(self, version: str) -> str | None:
+        """Return the expected release asset filename for this platform."""
+        system = platform.system()
+        if system == "Windows":
+            return f"YouTube-Audio-Ripper-v{version}-win64.zip"
+        if system == "Darwin":
+            return f"YouTube-Audio-Ripper-v{version}-macos.tar.gz"
+        if system == "Linux":
+            return f"YouTube-Audio-Ripper-v{version}-linux.tar.gz"
+        return None
+
+    def _find_asset_url(self, release: dict, asset_name: str | None) -> str | None:
+        """Find the download URL for a specific asset in a release."""
+        if not asset_name:
+            return None
+        assets = release.get("assets", [])
+        for asset in assets:
+            if asset.get("name") == asset_name:
+                return asset.get("browser_download_url")
+        return None
+
+    def _download_and_install_update(self, version: str, url: str):
+        """Download the update asset and replace the running executable."""
+        system = platform.system()
+
+        if system == "Windows":
+            self._download_and_install_windows(version, url)
+        elif system == "Darwin":
+            self._gui_log("🍎 macOS auto-install not yet supported — opening download page")
+            webbrowser.open(url)
+        elif system == "Linux":
+            self._gui_log("🐧 Linux auto-install not yet supported — opening download page")
+            webbrowser.open(url)
+        else:
+            self._gui_log(f"❓ Unsupported platform: {system}")
+            webbrowser.open(url)
+
+    def _download_and_install_windows(self, version: str, url: str):
+        """Windows-specific: download zip, extract, replace EXE via helper batch."""
+        import tkinter.filedialog as fd
+
+        # Ask where to save the downloaded update
+        save_path = fd.asksaveasfilename(
+            defaultextension=".zip",
+            filetypes=[("ZIP archive", "*.zip")],
+            initialfile=f"YouTube-Audio-Ripper-v{version}-win64.zip",
+            title="Save update package",
+        )
+        if not save_path:
+            return
+
+        self._gui_log(f"⬇️ Downloading update v{version}…")
+
+        def _do_update():
+            try:
+                # Download
+                req = urllib.request.Request(url, headers={"User-Agent": "youtube-audio-ripper-updater"})
+                with urllib.request.urlopen(req, timeout=30) as resp:
+                    data = resp.read()
+                Path(save_path).write_bytes(data)
+                self.after(0, self._gui_log, f"✅ Downloaded: {save_path}")
+
+                # Extract
+                extract_dir = Path(save_path).with_suffix("")
+                extract_dir.mkdir(exist_ok=True)
+                with zipfile.ZipFile(save_path, "r") as zf:
+                    zf.extractall(extract_dir)
+                self.after(0, self._gui_log, "✅ Extracted update package")
+
+                # Find the new EXE inside the extracted folder
+                new_exe = None
+                for f in extract_dir.rglob("*.exe"):
+                    if "YouTube Audio Ripper" in f.name:
+                        new_exe = f
+                        break
+                if not new_exe:
+                    self.after(0, self._gui_log, "❌ Could not find EXE in update package")
+                    return
+
+                # Create a helper batch script that replaces the running EXE
+                current_exe = Path(sys.executable)
+                batch_script = extract_dir / "apply_update.bat"
+                batch_content = f"""@echo off
+timeout /t 2 /nobreak >nul
+del /f /q "{current_exe}"
+copy /y "{new_exe}" "{current_exe}"
+start "" "{current_exe}"
+del /f /q "{batch_script}"
+rmdir /s /q "{extract_dir}"
+"""
+                batch_script.write_text(batch_content, encoding="utf-8")
+
+                self.after(0, self._gui_log, "🔄 Applying update — app will restart…")
+                # Launch the helper batch and exit
+                subprocess.Popen(
+                    [str(batch_script)],
+                    creationflags=subprocess.CREATE_NEW_CONSOLE | subprocess.DETACHED_PROCESS,
+                )
+                self.after(1000, self.quit)
+            except Exception as exc:
+                logger.exception("Auto-update failed")
+                err_msg = str(exc)
+                self.after(0, self._gui_log, f"❌ Update failed: {err_msg}")
+                self.after(0, lambda m=err_msg: messagebox.showerror("Update Failed", m))
+
+        threading.Thread(target=_do_update, daemon=True).start()
 
     def _skip_this_version(self, version: str):
         """Mark a version as skipped so it won't prompt again."""

@@ -5,6 +5,26 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.0] - 2026-11-10
+
+### Added
+
+- **Phase 8 — Documentation & Operations.** User manual (`USER_MANUAL.md`),
+  troubleshooting guide (`TROUBLESHOOTING.md`), release notes template
+  (`RELEASE_NOTES_TEMPLATE.md`), code signing documentation (`CODESIGNING.md`).
+- **Auto-download and install updates** — Windows auto-updater downloads the
+  release ZIP, extracts it, and replaces the running EXE via a helper batch
+  script (macOS/Linux still open the download page).
+- **Cross-platform CI builds** — `.github/workflows/release.yml` now builds
+  Windows (EXE + ZIP), macOS (.app + tar.gz), and Linux (binary + tar.gz)
+  in parallel and aggregates all assets into a single GitHub Release.
+
+### Changed
+
+- `CURRENT_VERSION` bumped to `2.3.0`.
+- `_check_updates_prompt()` now offers "Download & Install" (Windows) in
+  addition to "Open download page".
+
 ## [2.2.0] - 2026-11-10
 
 ### Added
