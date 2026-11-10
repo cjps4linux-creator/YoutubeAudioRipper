@@ -65,24 +65,95 @@ no account needed.
 
 ## Requirements
 
-- Python 3.11+
-- [yt-dlp](https://github.com/yt-dlp/yt-dlp)
+### Standalone EXE (recommended — no install needed)
 
-## Install
+Download `YouTube Audio Ripper.exe` from the [Releases page](https://github.com/cjps4linux-creator/youtube-audio-ripper/releases). `ffmpeg.exe` and `ffprobe.exe` are bundled — nothing else to install.
+
+| Component | Bundled with EXE? |
+|-----------|-------------------|
+| FFmpeg (`ffmpeg.exe`) | ✅ Yes |
+| FFprobe (`ffprobe.exe`) | ✅ Yes |
+| Python runtime | ✅ Yes (PyInstaller) |
+| All Python dependencies | ✅ Yes |
+
+### Source install (for developers)
+
+| Requirement | Version | Notes |
+|-------------|---------|-------|
+| Python | 3.11+ | Required to run from source |
+| yt-dlp | 2024.1.0+ | Audio downloading |
+| CustomTkinter | 5.2.0+ | GUI framework |
+| Pillow | 10.0.0+ | Image handling (cover art, themes) |
+| pystray | 0.19.0+ | System tray integration |
+| pywin32 | 306+ | Windows only — desktop shortcut creation |
+
+Install from `requirements.txt`:
 
 ```bash
-python -m venv .venv
-.venv\Scripts\activate          # Windows
 pip install -r requirements.txt
 ```
 
+FFmpeg must also be on your system PATH for source installs:
+
+```bash
+# Windows (winget)
+winget install Gyan.FFmpeg
+
+# macOS (Homebrew)
+brew install ffmpeg
+
+# Linux (apt)
+sudo apt-get install ffmpeg
+```
+
+## Install
+
+### Option 1 — Standalone EXE (recommended)
+
+No installation required. Just download and run:
+
+1. Go to the [Releases page](https://github.com/cjps4linux-creator/youtube-audio-ripper/releases)
+2. Download `YouTube Audio Ripper.exe`, `ffmpeg.exe`, and `ffprobe.exe`
+3. Place all three in the same folder
+4. Double-click `YouTube Audio Ripper.exe`
+
+Optionally, download the [Inno Setup installer script](build/youtube-ripper-setup.iss) to build a one-click Windows installer with Start Menu and desktop shortcuts.
+
+### Option 2 — Source install (for developers)
+
+```bash
+# Clone the repo
+git clone https://github.com/cjps4linux-creator/youtube-audio-ripper.git
+cd youtube-audio-ripper
+
+# Create and activate a virtual environment
+python -m venv .venv
+.venv\Scripts\activate          # Windows
+source .venv/bin/activate       # macOS/Linux
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Ensure FFmpeg is on PATH (see Requirements above)
+```
+
 ## Run
+
+### Standalone EXE
+
+Double-click `YouTube Audio Ripper.exe` — no installation, no command line.
+
+### From source
 
 ```bash
 python rip_gui.py
 ```
 
 Or double-click `launch.vbs` / `launch.bat` on Windows.
+
+### Portable mode
+
+Create an empty file named `portable` (no extension) next to the EXE or script. All state (settings, download history, logs) will be stored in the app directory instead of AppData — ideal for running from a USB stick.
 
 ## Authentication
 
