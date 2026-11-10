@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-YouTube Audio Ripper - Production-Grade Polished Version (Phase 3)
+YouTube Audio Ripper - Production-Grade Scaled Version (Phase 4)
 Paste a YouTube link, get a FLAC named after the track. Local GUI, no account needed.
 
 Phase 1 — Stabilise: class name fix, logging module, FFmpeg pre-flight check,
@@ -11,10 +11,14 @@ Phase 2 — Harden: cookies-from-browser support, resume partial downloads,
 deduplication registry, metadata embedding, retry with exponential backoff.
 
 Phase 3 — Polish: settings/preferences UI, per-file batch progress,
-file management (rename/delete/open/play), PyInstaller build spec,
-auto-updater, installer roadmap.
+file management (rename/delete/open/play), auto-updater, PyInstaller spec,
+installer roadmap.
+
+Phase 4 — Scale: parallel downloads (thread pool), playlist support,
+cover art extraction, bandwidth limiting, proxy support.
 """
 
+import concurrent.futures
 import json
 import logging
 import logging.handlers
@@ -30,6 +34,7 @@ import urllib.request
 from pathlib import Path
 
 import customtkinter as ctk
+from tkinter import simpledialog
 
 # ── Configuration ──────────────────────────────────────────────────────
 APP_DIR = Path(__file__).parent.resolve()
@@ -42,13 +47,19 @@ MAX_URL_LENGTH = 2048
 MAX_URLS_PER_BATCH = 50
 MAX_DOWNLOAD_RETRIES = 3
 RETRY_BASE_DELAY = 1.0  # seconds
+DEFAULT_MAX_WORKERS = 3
 
 GITHUB_REPO = "cjps4linux-creator/youtube-audio-ripper"
 GITHUB_API_LATEST = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
-CURRENT_VERSION = "2.0.0"
+CURRENT_VERSION = "2.1.0"
 
 YOUTUBE_URL_RE = re.compile(
     r"^https?://(?:www\.)?(?:youtube\.com/watch\?v=|youtu\.be/)[\w-]{11}(?:[?&].*)?$",
+    re.IGNORECASE,
+)
+
+PLAYLIST_URL_RE = re.compile(
+    r"^https?://(?:www\.)?youtube\.com/playlist\?list=[\w-]+(?:[?&].*)?$",
     re.IGNORECASE,
 )
 
@@ -68,6 +79,11 @@ DEFAULT_SETTINGS = {
     "default_format": "FLAC",
     "cookies_browser": "None",
     "ai_sensitivity_threshold": 0.7,
+    "max_workers": DEFAULT_MAX_WORKERS,
+    "bandwidth_kbps": 0,  # 0 = unlimited
+    "proxy_url": "",
+    "embed_cover_art": True,
+    "playlist_mode": False,
 }
 
 ctk.set_appearance_mode("dark")
@@ -263,17 +279,64 @@ def check_for_updates() -> dict | None:
     return None
 
 
+# ── Playlist dialog ────────────────────────────────────────────────────
+class PlaylistDialog(simpledialog.Dialog):
+    """Modal dialog listing playlist videos for selection."""
+
+    def __init__(self, parent, title, entries):
+        self.entries = entries  # list of (index, title, url)
+        self.selected = []
+        super().__init__(parent, title)
+
+    def body(self, master):
+        self.result = None
+        ctk.CTkLabel(
+            master, text="Select videos to download:",
+            font=ctk.CTkFont(size=12, weight="bold"),
+        ).pack(anchor="w", pady=(0, 8))
+
+        self.scroll = ctk.CTkScrollableFrame(master, height=300, width=560)
+        self.scroll.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+
+        self.checks = {}
+        for idx, title, url in self.entries:
+            var = ctk.BooleanVar(value=True)
+            cb = ctk.CTkCheckBox(
+                self.scroll, text=f"{idx + 1}. {title[:70]}",
+                variable=var, font=ctk.CTkFont(size=10),
+            )
+            cb.pack(anchor="w", padx=5, pady=2)
+            self.checks[idx] = (var, url)
+
+        btn_frame = ctk.CTkFrame(master, fg_color="transparent")
+        btn_frame.pack(fill="x", pady=(0, 10))
+        ctk.CTkButton(btn_frame, text="Select All", command=self._select_all).pack(side="left", padx=5)
+        ctk.CTkButton(btn_frame, text="Select None", command=self._select_none).pack(side="left", padx=5)
+        return master
+
+    def _select_all(self):
+        for var, _ in self.checks.values():
+            var.set(True)
+
+    def _select_none(self):
+        for var, _ in self.checks.values():
+            var.set(False)
+
+    def apply(self):
+        self.selected = [url for var, url in self.checks.values() if var.get()]
+
+
 # ── Application ────────────────────────────────────────────────────────
 class YouTubeRipperApp(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title("YouTube Audio Ripper")
-        self.geometry("800x720")
+        self.geometry("900x820")
 
         # Center window
         self.update_idletasks()
-        x = (self.winfo_screenwidth() - 800) // 2
-        y = (self.winfo_screenheight() - 720) // 2
+        x = (self.winfo_screenwidth() - 900) // 2
+        y = (self.winfo_screenheight() - 820) // 2
         self.geometry(f"+{x}+{y}")
 
         self.settings = load_settings()
@@ -281,6 +344,8 @@ class YouTubeRipperApp(ctk.CTk):
         self.processing = False
         self.current_job = 0
         self.total_jobs = 0
+        self.completed_jobs = 0
+        self._stop_requested = False
         self._build_ui()
 
         # Run pre-flight + update check after UI is built
@@ -299,7 +364,7 @@ class YouTubeRipperApp(ctk.CTk):
             font=ctk.CTkFont(size=24, weight="bold"),
         ).pack(pady=(0, 5))
         ctk.CTkLabel(
-            self.main, text=f"v{CURRENT_VERSION}  •  Download → FLAC/MP3/M4A with metadata",
+            self.main, text=f"v{CURRENT_VERSION}  •  Download → FLAC/MP3/M4A with metadata & cover art",
             font=ctk.CTkFont(size=11), text_color="gray",
         ).pack(pady=(0, 15))
 
@@ -325,34 +390,80 @@ class YouTubeRipperApp(ctk.CTk):
         )
         self.hint_label.pack(anchor="w", pady=(0, 10))
 
-        # ── Options ────────────────────────────────────────────────
-        opts = ctk.CTkFrame(self.main, fg_color="transparent")
-        opts.pack(fill="x", pady=(0, 10))
+        # ── Options Row 1 ──────────────────────────────────────────
+        opts1 = ctk.CTkFrame(self.main, fg_color="transparent")
+        opts1.pack(fill="x", pady=(0, 8))
 
-        ctk.CTkLabel(opts, text="Format:", font=ctk.CTkFont(size=11, weight="bold")).pack(side="left", padx=(0, 6))
+        ctk.CTkLabel(opts1, text="Format:", font=ctk.CTkFont(size=11, weight="bold")).pack(side="left", padx=(0, 6))
         self.format_var = ctk.StringVar(value=self.settings.get("default_format", "FLAC"))
         self.format_dropdown = ctk.CTkOptionMenu(
-            opts, values=SUPPORTED_FORMATS, variable=self.format_var,
+            opts1, values=SUPPORTED_FORMATS, variable=self.format_var,
             width=110, font=ctk.CTkFont(size=11),
         )
         self.format_dropdown.pack(side="left", padx=(0, 20))
 
-        ctk.CTkLabel(opts, text="Auth:", font=ctk.CTkFont(size=11, weight="bold")).pack(side="left", padx=(0, 6))
+        ctk.CTkLabel(opts1, text="Auth:", font=ctk.CTkFont(size=11, weight="bold")).pack(side="left", padx=(0, 6))
         self.browser_var = ctk.StringVar(value=self.settings.get("cookies_browser", "None"))
         self.browser_dropdown = ctk.CTkOptionMenu(
-            opts, values=SUPPORTED_BROWSERS, variable=self.browser_var,
+            opts1, values=SUPPORTED_BROWSERS, variable=self.browser_var,
             width=110, font=ctk.CTkFont(size=11),
         )
-        self.browser_dropdown.pack(side="left")
+        self.browser_dropdown.pack(side="left", padx=(0, 20))
 
-        # ── Start Button ───────────────────────────────────────────
+        self.playlist_var = ctk.BooleanVar(value=self.settings.get("playlist_mode", False))
+        self.playlist_checkbox = ctk.CTkCheckBox(
+            opts1, text="Playlist mode", variable=self.playlist_var,
+            font=ctk.CTkFont(size=11),
+        )
+        self.playlist_checkbox.pack(side="left")
+
+        # ── Options Row 2 ──────────────────────────────────────────
+        opts2 = ctk.CTkFrame(self.main, fg_color="transparent")
+        opts2.pack(fill="x", pady=(0, 8))
+
+        ctk.CTkLabel(opts2, text="Max concurrent:", font=ctk.CTkFont(size=11, weight="bold")).pack(side="left", padx=(0, 6))
+        self.workers_var = ctk.StringVar(value=str(self.settings.get("max_workers", DEFAULT_MAX_WORKERS)))
+        self.workers_entry = ctk.CTkEntry(opts2, textvariable=self.workers_var, width=60, font=ctk.CTkFont(size=11))
+        self.workers_entry.pack(side="left", padx=(0, 20))
+
+        ctk.CTkLabel(opts2, text="Bandwidth cap (KB/s):", font=ctk.CTkFont(size=11, weight="bold")).pack(side="left", padx=(0, 6))
+        self.bandwidth_var = ctk.StringVar(value=str(self.settings.get("bandwidth_kbps", 0)))
+        self.bandwidth_entry = ctk.CTkEntry(opts2, textvariable=self.bandwidth_var, width=70, font=ctk.CTkFont(size=11))
+        self.bandwidth_entry.pack(side="left", padx=(0, 20))
+
+        ctk.CTkLabel(opts2, text="Proxy:", font=ctk.CTkFont(size=11, weight="bold")).pack(side="left", padx=(0, 6))
+        self.proxy_var = ctk.StringVar(value=self.settings.get("proxy_url", ""))
+        self.proxy_entry = ctk.CTkEntry(opts2, textvariable=self.proxy_var, width=160, font=ctk.CTkFont(size=11),
+                                        placeholder_text="http://host:port or socks5://host:port")
+        self.proxy_entry.pack(side="left")
+
+        self.cover_art_var = ctk.BooleanVar(value=self.settings.get("embed_cover_art", True))
+        self.cover_art_checkbox = ctk.CTkCheckBox(
+            opts2, text="Embed cover art", variable=self.cover_art_var,
+            font=ctk.CTkFont(size=11),
+        )
+        self.cover_art_checkbox.pack(side="left", padx=(20, 0))
+
+        # ── Start / Stop Buttons ───────────────────────────────────
+        btn_row = ctk.CTkFrame(self.main, fg_color="transparent")
+        btn_row.pack(fill="x", pady=10)
+
         self.start_btn = ctk.CTkButton(
-            self.main, text="🎵 START RIPPING 🎵",
-            font=ctk.CTkFont(size=20, weight="bold"),
-            height=60, fg_color="green", hover_color="darkgreen",
+            btn_row, text="🎵 START RIPPING 🎵",
+            font=ctk.CTkFont(size=18, weight="bold"),
+            height=50, fg_color="green", hover_color="darkgreen",
             command=self._start_rip,
         )
-        self.start_btn.pack(fill="x", pady=15)
+        self.start_btn.pack(side="left", padx=(0, 10))
+
+        self.stop_btn = ctk.CTkButton(
+            btn_row, text="⏹ STOP",
+            font=ctk.CTkFont(size=14, weight="bold"),
+            height=50, fg_color="red", hover_color="darkred",
+            command=self._request_stop,
+            state="disabled",
+        )
+        self.stop_btn.pack(side="left")
 
         # ── Batch Progress ─────────────────────────────────────────
         self.batch_frame = ctk.CTkFrame(self.main)
@@ -390,7 +501,7 @@ class YouTubeRipperApp(ctk.CTk):
         out_row.pack(fill="x", padx=10, pady=5)
         ctk.CTkLabel(out_row, text="Output Directory:", width=140).pack(side="left")
         self.output_dir_var = ctk.StringVar(value=self.settings.get("output_dir", str(DEFAULT_OUTPUT_DIR)))
-        self.output_dir_entry = ctk.CTkEntry(out_row, textvariable=self.output_dir_var, width=350)
+        self.output_dir_entry = ctk.CTkEntry(out_row, textvariable=self.output_dir_var, width=320)
         self.output_dir_entry.pack(side="left", padx=(10, 10), fill="x", expand=True)
         ctk.CTkButton(out_row, text="Browse", width=70, command=self._browse_output_dir).pack(side="left")
 
@@ -463,6 +574,11 @@ class YouTubeRipperApp(ctk.CTk):
         self.settings["default_format"] = self.format_var.get()
         self.settings["cookies_browser"] = self.browser_var.get()
         self.settings["ai_sensitivity_threshold"] = round(float(self.ai_slider.get()), 1)
+        self.settings["max_workers"] = int(self.workers_var.get() or DEFAULT_MAX_WORKERS)
+        self.settings["bandwidth_kbps"] = int(self.bandwidth_var.get() or 0)
+        self.settings["proxy_url"] = self.proxy_var.get()
+        self.settings["embed_cover_art"] = self.cover_art_var.get()
+        self.settings["playlist_mode"] = self.playlist_var.get()
         save_settings(self.settings)
         Path(self.settings["output_dir"]).mkdir(parents=True, exist_ok=True)
         self._gui_log("✅ Settings saved")
@@ -499,6 +615,10 @@ class YouTubeRipperApp(ctk.CTk):
         else:
             logger.info("No update available")
 
+    def _request_stop(self):
+        self._stop_requested = True
+        self._gui_log("⏹ Stop requested — finishing current files…")
+
     # ── Download flow ────────────────────────────────────────────────
     def _start_rip(self):
         if self.processing:
@@ -520,67 +640,150 @@ class YouTubeRipperApp(ctk.CTk):
             return
 
         self.processing = True
-        self.total_jobs = len(valid_urls)
+        self._stop_requested = False
+        self.completed_jobs = 0
+
+        # Detect playlists if playlist mode is on
+        urls_to_process = list(valid_urls)
+        if self.playlist_var.get():
+            urls_to_process = self._expand_playlists(urls_to_process)
+            if not urls_to_process:
+                self.processing = False
+                return
+
+        self.total_jobs = len(urls_to_process)
         self.current_job = 0
 
+        max_workers = int(self.workers_var.get() or DEFAULT_MAX_WORKERS)
+
         self.start_btn.configure(state="disabled", text="⏳ Processing…")
+        self.stop_btn.configure(state="normal")
         self.file_progress.set(0)
         self.batch_progress.set(0)
         self.batch_frame.pack(fill="x", pady=(0, 10))
         self.file_label.configure(text=f"Starting batch of {self.total_jobs}…")
-        self._gui_log(f"📋 Processing {self.total_jobs} URL(s)…")
+        self._gui_log(f"📋 Processing {self.total_jobs} URL(s) with {max_workers} concurrent worker(s)…")
         Path(self.settings.get("output_dir", str(DEFAULT_OUTPUT_DIR))).mkdir(parents=True, exist_ok=True)
 
-        threading.Thread(target=self._process, args=(valid_urls,), daemon=True).start()
+        threading.Thread(
+            target=self._process_parallel, args=(urls_to_process, max_workers), daemon=True
+        ).start()
 
-    def _process(self, urls: list[str]):
+    def _expand_playlists(self, urls: list[str]) -> list[str]:
+        """Detect playlist URLs and prompt user to select videos."""
+        import yt_dlp
+        expanded: list[str] = []
+        for url in urls:
+            if PLAYLIST_URL_RE.match(url):
+                self._gui_log(f"🔍 Detecting playlist: {url[:60]}…")
+                try:
+                    ydl_opts = {
+                        "quiet": True,
+                        "no_warnings": True,
+                        "extract_flat": True,
+                    }
+                    if self.proxy_var.get():
+                        ydl_opts["proxy"] = self.proxy_var.get()
+                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                        info = ydl.extract_info(url, download=False)
+                    entries = info.get("entries", [])
+                    if not entries:
+                        self._gui_log("⚠️ No entries found in playlist")
+                        continue
+                    # Show selection dialog
+                    dialog_entries = [
+                        (i, e.get("title", f"Video {i+1}"), e.get("url", f"https://www.youtube.com/watch?v={e.get('id')}"))
+                        for i, e in enumerate(entries) if e
+                    ]
+                    dialog = PlaylistDialog(self, f"Playlist: {info.get('title', 'Untitled')}", dialog_entries)
+                    self.wait_window(dialog)
+                    selected = dialog.selected or []
+                    self._gui_log(f"📋 Selected {len(selected)} of {len(dialog_entries)} videos from playlist")
+                    expanded.extend(selected)
+                except Exception as exc:
+                    self._gui_log(f"❌ Failed to detect playlist: {str(exc)[:100]}")
+                    logger.exception("Playlist detection failed for %s", url)
+            else:
+                expanded.append(url)
+        return expanded
+
+    def _process_parallel(self, urls: list[str], max_workers: int):
         output_dir = Path(self.settings.get("output_dir", str(DEFAULT_OUTPUT_DIR)))
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        for i, url in enumerate(urls):
-            self.current_job = i + 1
-            self.after(0, self._update_batch_progress, i, url)
-            try:
-                self._download_convert(url, output_dir)
-            except Exception as e:
-                self.after(0, self._gui_log, f"❌ Error: {str(e)[:100]}")
-                logger.exception("Download failed for %s", url)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_url = {
+                executor.submit(self._download_convert, url, output_dir): url
+                for url in urls
+            }
+            for future in concurrent.futures.as_completed(future_to_url):
+                if self._stop_requested:
+                    break
+                url = future_to_url[future]
+                self.current_job += 1
+                self.completed_jobs += 1
+                try:
+                    future.result()
+                except Exception as exc:
+                    self.after(0, self._gui_log, f"❌ Error for {url[:50]}: {str(exc)[:100]}")
+                    logger.exception("Download failed for %s", url)
+                finally:
+                    progress = self.completed_jobs / self.total_jobs if self.total_jobs else 0
+                    self.after(0, self.batch_progress.configure, {"value": progress})
+                    self.after(0, self.file_label.configure, {
+                        "text": f"Completed {self.completed_jobs}/{self.total_jobs}"
+                    })
 
         self.after(0, self._done)
 
-    def _update_batch_progress(self, index: int, url: str):
-        self.file_label.configure(text=f"[{index + 1}/{self.total_jobs}] {url[:50]}…")
-        self.batch_progress.set(index / self.total_jobs if self.total_jobs else 0)
-
     def _download_convert(self, url: str, output_dir: Path):
+        """Download, deduplicate-check, convert, and embed metadata + cover art."""
         import yt_dlp
 
+        # ── Deduplication check ───────────────────────────────────────
         existing = is_already_downloaded(url, self.downloads_registry)
         if existing:
             self.after(0, self._gui_log, f"⏭️ Skipping (already downloaded): {existing}")
-            self.after(0, self._update_batch_progress, self.current_job - 1, url)
             return
 
         temp_dir = Path(tempfile.gettempdir())
-        temp_file = temp_dir / "ripper_temp.%(ext)s"
-        for f in temp_dir.glob("ripper_temp.*"):
+        tid = threading.get_ident()
+        temp_file = temp_dir / f"ripper_temp_{tid}.%(ext)s"
+        thumbnail_file = temp_dir / f"ripper_thumb_{tid}.%(ext)s"
+
+        # Clean old temp files for this thread
+        for f in temp_dir.glob(f"ripper_temp_{tid}.*"):
+            f.unlink(missing_ok=True)
+        for f in temp_dir.glob(f"ripper_thumb_{tid}.*"):
             f.unlink(missing_ok=True)
 
-        self.after(0, self._gui_log, "Downloading…")
+        self.after(0, self._gui_log, f"⬇️ Downloading: {url[:60]}…")
         self.after(0, self.file_progress.configure, {"value": 0.2})
 
+        # ── yt-dlp options ────────────────────────────────────────────
         cookies_from_browser = self.settings.get("cookies_browser", "None")
+        bandwidth_kbps = self.settings.get("bandwidth_kbps", 0)
+        proxy_url = self.settings.get("proxy_url", "")
+        embed_cover = self.settings.get("embed_cover_art", True)
+
         ydl_opts = {
             "format": "bestaudio/best",
             "outtmpl": str(temp_file),
             "quiet": True,
             "no_warnings": True,
-            "continuedl": True,
-            "noplaylist": True,
+            "continuedl": True,  # resume partial downloads
+            "noplaylist": True,  # single video only (playlist handled separately)
         }
+
         if cookies_from_browser != "None":
             ydl_opts["cookiesfrombrowser"] = cookies_from_browser
-            self.after(0, self._gui_log, f"Using cookies from {cookies_from_browser}…")
+        if bandwidth_kbps > 0:
+            ydl_opts["ratelimit"] = bandwidth_kbps * 1024  # KB/s -> bytes/s
+        if proxy_url:
+            ydl_opts["proxy"] = proxy_url
+        if embed_cover:
+            ydl_opts["writethumbnail"] = True
+            ydl_opts["thumbnail"] = str(thumbnail_file)
 
         def _do_download():
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -589,10 +792,11 @@ class YouTubeRipperApp(ctk.CTk):
                 artist = info.get("artist") or info.get("uploader") or "Unknown Artist"
                 album = info.get("album") or ""
                 track = info.get("track") or ""
-                return info, title, artist, album, track
+                thumbnail = info.get("thumbnail") or ""
+                return info, title, artist, album, track, thumbnail
 
         try:
-            info, title, artist, album, track = retry_download(_do_download)
+            info, title, artist, album, track, thumbnail_url = retry_download(_do_download)
         except Exception as exc:
             self.after(0, self._gui_log, f"❌ Download failed after retries: {str(exc)[:100]}")
             raise
@@ -600,13 +804,21 @@ class YouTubeRipperApp(ctk.CTk):
         self.after(0, self._gui_log, f"✅ Downloaded: {title[:40]}")
         self.after(0, self.file_progress.configure, {"value": 0.5})
 
+        # Find downloaded audio file
         downloaded = None
-        for f in temp_dir.glob("ripper_temp.*"):
+        for f in temp_dir.glob(f"ripper_temp_{tid}.*"):
             if f.exists():
                 downloaded = f
                 break
         if not downloaded:
             raise FileNotFoundError("Download failed — no output file found")
+
+        # Find thumbnail file
+        thumbnail_path = None
+        for f in temp_dir.glob(f"ripper_thumb_{tid}.*"):
+            if f.exists():
+                thumbnail_path = f
+                break
 
         self.after(0, self._gui_log, "Converting to FLAC…")
         self.after(0, self.file_progress.configure, {"value": 0.7})
@@ -621,15 +833,24 @@ class YouTubeRipperApp(ctk.CTk):
             output_file = output_dir / f"{original_output.stem}_{counter}.{fmt.lower()}"
             counter += 1
 
+        # ── FFmpeg conversion with metadata + cover art ───────────────
         ffmpeg_cmd = [
             "ffmpeg", "-y", "-i", str(downloaded),
         ]
+
+        # Add thumbnail as second input if available and embedding enabled
+        thumb_input = None
+        if embed_cover and thumbnail_path and thumbnail_path.exists():
+            thumb_input = str(thumbnail_path)
+            ffmpeg_cmd.extend(["-i", thumb_input])
+
         if fmt == "FLAC":
             ffmpeg_cmd.extend(["-q:a", "0", "-c:a", "flac", "-ar", "44100"])
         elif fmt == "MP3":
             ffmpeg_cmd.extend(["-q:a", "0", "-c:a", "libmp3lame", "-ar", "44100"])
         elif fmt == "M4A":
             ffmpeg_cmd.extend(["-c:a", "aac", "-b:a", "256k", "-ar", "44100"])
+
         ffmpeg_cmd.extend([
             "-metadata", f"title={title}",
             "-metadata", f"artist={artist}",
@@ -638,29 +859,48 @@ class YouTubeRipperApp(ctk.CTk):
             ffmpeg_cmd.extend(["-metadata", f"album={album}"])
         if track:
             ffmpeg_cmd.extend(["-metadata", f"track={track}"])
+
+        # Embed cover art as attached picture
+        if thumb_input:
+            ffmpeg_cmd.extend([
+                "-map", "0", "-map", "1",
+                "-c", "copy", "-c:v", "mjpeg",
+                "-disposition:v:0", "attached_pic",
+            ])
+
         ffmpeg_cmd.append(str(output_file))
 
         result = subprocess.run(ffmpeg_cmd, capture_output=True, text=True)
         if result.returncode != 0:
             raise RuntimeError("FFmpeg conversion failed")
 
+        # Cleanup temp files
         downloaded.unlink(missing_ok=True)
+        if thumb_input:
+            Path(thumb_input).unlink(missing_ok=True)
 
+        # ── Update deduplication registry ─────────────────────────────
         self.downloads_registry[url] = output_file.name
         save_registry(self.downloads_registry)
 
         size_mb = output_file.stat().st_size / (1024 * 1024)
         self.after(0, self._gui_log, f"✅ Saved: {output_file.name} ({size_mb:.1f} MB)")
         self.after(0, self.file_progress.configure, {"value": 1.0})
-        logger.info("Saved %s (%.1f MB) from %s [format=%s]", output_file.name, size_mb, url, fmt)
+        logger.info(
+            "Saved %s (%.1f MB) from %s [format=%s, cover=%s, proxy=%s]",
+            output_file.name, size_mb, url, fmt,
+            bool(thumb_input), bool(proxy_url),
+        )
 
     def _done(self):
         self.processing = False
         self.start_btn.configure(state="normal", text="🎵 START RIPPING 🎵")
+        self.stop_btn.configure(state="disabled")
         self.batch_frame.pack_forget()
         self.file_progress.set(0)
         self.batch_progress.set(0)
-        self._gui_log(f"\n✅ Done! Files in: {self.settings.get('output_dir', str(DEFAULT_OUTPUT_DIR))}")
+        status = "stopped early" if self._stop_requested else "Done"
+        self._gui_log(f"\n✅ {status}! Files in: {self.settings.get('output_dir', str(DEFAULT_OUTPUT_DIR))}")
         logger.info("Batch complete. Output directory: %s", self.settings.get("output_dir"))
         self._refresh_file_list()
 
