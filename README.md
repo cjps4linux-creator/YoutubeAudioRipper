@@ -16,8 +16,8 @@
 ## What it does
 
 A desktop app that downloads audio from YouTube links, converts it to FLAC
-(or MP3/M4A), and names each file after the video title — sanitised for the
-filesystem. No command line, no account needed.
+(or MP3/M4A), and names each file after the video title. No command line,
+no account needed.
 
 ### Core workflow
 
