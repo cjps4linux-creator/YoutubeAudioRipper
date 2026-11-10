@@ -15,14 +15,43 @@
 
 ## What it does
 
-A desktop app that downloads the audio from a YouTube link, converts it to
-FLAC, and names the file after the video title rather than a running number.
+A desktop app that downloads audio from YouTube links, converts it to FLAC
+(or MP3/M4A), and names each file after the video title — sanitised for the
+filesystem. No command line, no account needed.
 
-- **Paste-and-go GUI**  -  CustomTkinter, no command line
-- **FLAC output**  -  with metadata preserved
-- **Smart filenames**  -  `Rick Astley - Never Gonna Give You Up.flac`, sanitised
-  for the filesystem
-- **Batch friendly**  -  no more `001.flac` overwriting `001.flac`
+### Core workflow
+
+| Step | What happens |
+|------|--------------|
+| 1 | Paste a YouTube URL into the app |
+| 2 | App validates the URL and checks FFmpeg is present |
+| 3 | yt-dlp downloads the best available audio |
+| 4 | FFmpeg converts to your chosen format (FLAC default) |
+| 5 | Metadata (title, artist, album, cover art) is embedded |
+| 6 | File is saved with a clean, sanitised name |
+
+### Key features
+
+- **Paste-and-go GUI** — CustomTkinter interface, no command line required
+- **Format choice** — FLAC (lossless), MP3, or M4A output
+- **Metadata & cover art** — title, artist, album, and embedded thumbnail
+- **Smart filenames** — `Rick Astley - Never Gonna Give You Up.flac`, not `001.flac`
+- **Batch downloads** — queue multiple URLs, per-file progress, stop anytime
+- **Playlist support** — detect and select which videos to rip from a playlist
+- **Parallel downloads** — ThreadPoolExecutor for concurrent rips
+- **Resume** — interrupted downloads continue where they left off
+- **Deduplication** — `downloads.json` registry prevents re-ripping the same track
+- **Retry** — exponential backoff (1s, 2s, 4s, max 3 attempts) on failure
+- **Cookies-from-browser** — authenticate with Chrome/Edge/Firefox for bot-protected videos
+- **Bandwidth limiting** — cap download speed in KB/s
+- **Proxy support** — SOCKS5/HTTP proxy configuration
+- **Download history** — view past rips, re-download, export to CSV
+- **Themes** — Dark / Light / System toggle
+- **Keyboard shortcuts** — Ctrl+V paste, Ctrl+Enter start, Escape stop, etc.
+- **Portable mode** — create an empty `portable` file next to the EXE to store state locally
+- **Auto-updater** — checks GitHub releases on startup, downloads and installs updates
+- **FFmpeg bundled** — `ffmpeg.exe` and `ffprobe.exe` ship alongside the EXE
+- **Logging** — file + console logs for troubleshooting
 
 ## Screenshots
 
