@@ -103,4 +103,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Initial release: paste a link, get a FLAC with the track title as filename
 
-[1.0.0]: https://github.com/cjps4linux-creator/youtube-audio-ripper/releases/tag/v1.0.0
+[1.0.0]: https://github.com/cjps4linux-creator/Youtube-Audio-Ripper/releases/tag/v1.0.0

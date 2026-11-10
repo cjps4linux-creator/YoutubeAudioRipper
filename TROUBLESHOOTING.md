@@ -33,7 +33,7 @@ FFmpeg is not on the system PATH and not bundled next to the executable.
 
 ### Fix
 
-**Standalone installer:** FFmpeg is bundled automatically. Re-download from the [Releases page](https://github.com/cjps4linux-creator/youtube-audio-ripper/releases).
+**Standalone installer:** FFmpeg is bundled automatically. Re-download from the [Releases page](https://github.com/cjps4linux-creator/Youtube-Audio-Ripper/releases).
 
 **Source install:** Install FFmpeg and ensure `ffmpeg` is on PATH:
 ```bash
@@ -264,7 +264,7 @@ No network access, GitHub API rate limit, or the app is running an older version
 
 1. Verify internet connectivity.
 2. Check Settings → "Check for updates on startup" is enabled.
-3. Manually visit the [Releases page](https://github.com/cjps4linux-creator/youtube-audio-ripper/releases) to check for new versions.
+3. Manually visit the [Releases page](https://github.com/cjps4linux-creator/Youtube-Audio-Ripper/releases) to check for new versions.
 4. If you're behind a proxy, configure it in Settings → Proxy.
 
 ---
@@ -274,7 +274,7 @@ No network access, GitHub API rate limit, or the app is running an older version
 If this guide doesn't resolve your issue:
 
 1. Check `youtube_ripper.log` for the full error traceback.
-2. Search existing issues: https://github.com/cjps4linux-creator/youtube-audio-ripper/issues
+2. Search existing issues: https://github.com/cjps4linux-creator/Youtube-Audio-Ripper/issues
 3. Open a new issue with:
    - Your OS and version
    - App version (shown in the header)

@@ -5,7 +5,7 @@
 #define MyAppName "YouTube Audio Ripper"
 #define MyAppVersion "2.1.0"
 #define MyAppPublisher "Conrad CJ Wilson"
-#define MyAppURL "https://github.com/cjps4linux-creator/youtube-audio-ripper"
+#define MyAppURL "https://github.com/cjps4linux-creator/Youtube-Audio-Ripper"
 #define MyAppExeName "YouTube Audio Ripper.exe"
 
 [Setup]

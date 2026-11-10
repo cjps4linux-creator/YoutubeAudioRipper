@@ -89,7 +89,7 @@ Use [fpm](https://github.com/jordansissel/fpm) to build packages from the
 PyInstaller `--onefile` output or from a directory layout:
 
 ```bash
-fpm -s dir -t deb -n youtube-audio-ripper -v 2.0.0 \
+fpm -s dir -t deb -n Youtube-Audio-Ripper -v 2.0.0 \
     dist/YouTube\ Audio\ Ripper=/usr/bin/ \
     assets/icon.png=/usr/share/icons/hicolor/256x256/apps/
 ```
@@ -100,7 +100,7 @@ RPM equivalent with `-t rpm`.
 
 The app checks GitHub releases on startup (`check_for_updates()` in `rip_gui.py`):
 
-* Hits `https://api.github.com/repos/cjps4linux-creator/youtube-audio-ripper/releases/latest`
+* Hits `https://api.github.com/repos/cjps4linux-creator/Youtube-Audio-Ripper/releases/latest`
 * Compares the tag semver against `CURRENT_VERSION`
 * Logs a message if a newer version is available
 

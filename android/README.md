@@ -89,7 +89,7 @@ Output:
 2. Convert: `python convert_cookies.py cookies.tsv cookies.txt`
 3. Place `cookies.txt` in the app folder
 
-See your Windows app's `skill_youtube-audio-ripper/references/authentication.md` for details.
+See your Windows app's `skill_Youtube-Audio-Ripper/references/authentication.md` for details.
 
 ---
 

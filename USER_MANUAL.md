@@ -1,6 +1,6 @@
 # YouTube Audio Ripper — User Manual
 
-**Version 2.3.0** · Conrad CJ Wilson · https://github.com/cjps4linux-creator/youtube-audio-ripper
+**Version 2.3.0** · Conrad CJ Wilson · https://github.com/cjps4linux-creator/Youtube-Audio-Ripper
 
 ---
 
@@ -50,7 +50,7 @@ No account is required. No telemetry is collected. Everything runs locally.
 
 ### Option A: Standalone Installer (Recommended)
 
-1. Go to the [Releases page](https://github.com/cjps4linux-creator/youtube-audio-ripper/releases).
+1. Go to the [Releases page](https://github.com/cjps4linux-creator/Youtube-Audio-Ripper/releases).
 2. Download the asset for your platform:
    - **Windows:** `YouTube-Audio-Ripper-vX.Y.Z-win64.zip`
    - **macOS:** `YouTube-Audio-Ripper-vX.Y.Z-macos.tar.gz`
@@ -64,8 +64,8 @@ No account is required. No telemetry is collected. Everything runs locally.
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/cjps4linux-creator/youtube-audio-ripper.git
-   cd youtube-audio-ripper
+   git clone https://github.com/cjps4linux-creator/Youtube-Audio-Ripper.git
+   cd Youtube-Audio-Ripper
    ```
 2. Create a virtual environment:
    ```bash

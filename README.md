@@ -3,8 +3,8 @@
 <p align="center"><b>Paste a link, get a FLAC named after the track. Local GUI, no account needed.</b></p>
 
 <p align="center">
-  <a href="https://github.com/cjps4linux-creator/youtube-audio-ripper/actions/workflows/ci.yml"><img src="https://github.com/cjps4linux-creator/youtube-audio-ripper/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="https://github.com/cjps4linux-creator/youtube-audio-ripper/releases/tag/v2.3.0"><img src="https://img.shields.io/badge/release-v2.3.0-0a7563" alt="Release v2.3.0"></a>
+  <a href="https://github.com/cjps4linux-creator/Youtube-Audio-Ripper/actions/workflows/ci.yml"><img src="https://github.com/cjps4linux-creator/Youtube-Audio-Ripper/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/cjps4linux-creator/Youtube-Audio-Ripper/releases/tag/v2.3.0"><img src="https://img.shields.io/badge/release-v2.3.0-0a7563" alt="Release v2.3.0"></a>
   <img src="https://img.shields.io/badge/license-MIT-0a7563" alt="License: MIT">
   <img src="https://img.shields.io/badge/python-3.11%2B-3776ab" alt="Python 3.11+">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-8a5800" alt="Platforms">
@@ -67,7 +67,7 @@ no account needed.
 
 ### Standalone EXE (recommended — no install needed)
 
-Download `YouTube Audio Ripper.exe` from the [Releases page](https://github.com/cjps4linux-creator/youtube-audio-ripper/releases). `ffmpeg.exe` and `ffprobe.exe` are bundled — nothing else to install.
+Download `YouTube Audio Ripper.exe` from the [Releases page](https://github.com/cjps4linux-creator/Youtube-Audio-Ripper/releases). `ffmpeg.exe` and `ffprobe.exe` are bundled — nothing else to install.
 
 | Component | Bundled with EXE? |
 |-----------|-------------------|
@@ -112,7 +112,7 @@ sudo apt-get install ffmpeg
 
 No installation required. Just download and run:
 
-1. Go to the [Releases page](https://github.com/cjps4linux-creator/youtube-audio-ripper/releases)
+1. Go to the [Releases page](https://github.com/cjps4linux-creator/Youtube-Audio-Ripper/releases)
 2. Download `YouTube Audio Ripper.exe`, `ffmpeg.exe`, and `ffprobe.exe`
 3. Place all three in the same folder
 4. Double-click `YouTube Audio Ripper.exe`
@@ -123,8 +123,8 @@ Optionally, download the [Inno Setup installer script](build/youtube-ripper-setu
 
 ```bash
 # Clone the repo
-git clone https://github.com/cjps4linux-creator/youtube-audio-ripper.git
-cd youtube-audio-ripper
+git clone https://github.com/cjps4linux-creator/Youtube-Audio-Ripper.git
+cd Youtube-Audio-Ripper
 
 # Create and activate a virtual environment
 python -m venv .venv
@@ -199,5 +199,5 @@ If you trust the source, the warning can be safely ignored.
 ## Download
 
 Get the latest standalone EXE from the
-[Releases page](https://github.com/cjps4linux-creator/youtube-audio-ripper/releases).
+[Releases page](https://github.com/cjps4linux-creator/Youtube-Audio-Ripper/releases).
 No installation required — just run the EXE.

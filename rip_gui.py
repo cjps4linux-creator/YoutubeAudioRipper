@@ -85,7 +85,7 @@ else:
     DOWNLOADS_REGISTRY = APP_DIR / "downloads.json"
     HISTORY_FILE = APP_DIR / "download_history.json"
 
-GITHUB_REPO = "cjps4linux-creator/youtube-audio-ripper"
+GITHUB_REPO = "cjps4linux-creator/Youtube-Audio-Ripper"
 GITHUB_API_LATEST = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 CURRENT_VERSION = "2.3.0"
 
@@ -391,7 +391,7 @@ def check_for_updates() -> dict | None:
     try:
         req = urllib.request.Request(
             GITHUB_API_LATEST,
-            headers={"User-Agent": "youtube-audio-ripper-updater"},
+            headers={"User-Agent": "Youtube-Audio-Ripper-updater"},
         )
         with urllib.request.urlopen(req, timeout=10) as resp:
             data = json.loads(resp.read().decode("utf-8"))
@@ -1171,7 +1171,7 @@ class YouTubeRipperApp(ctk.CTk):
         def _do_update():
             try:
                 # Download
-                req = urllib.request.Request(url, headers={"User-Agent": "youtube-audio-ripper-updater"})
+                req = urllib.request.Request(url, headers={"User-Agent": "Youtube-Audio-Ripper-updater"})
                 with urllib.request.urlopen(req, timeout=30) as resp:
                     data = resp.read()
                 Path(save_path).write_bytes(data)
@@ -1235,7 +1235,7 @@ rmdir /s /q "{extract_dir}"
             "Paste a YouTube link, get a FLAC/MP3/M4A with metadata and cover art.\n\n"
             "Built with customtkinter, yt-dlp, FFmpeg.\n\n"
             "© 2026 Conrad CJ Wilson\n"
-            "https://github.com/cjps4linux-creator/youtube-audio-ripper"
+            "https://github.com/cjps4linux-creator/Youtube-Audio-Ripper"
         )
         messagebox.showinfo("About YouTube Audio Ripper", msg)
 
