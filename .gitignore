@@ -44,3 +44,9 @@ dist/
 *.spec
 !build/build_windows.bat
 !build/youtube_ripper.spec
+
+# User-generated state (not committed)
+download_history.json
+downloads.json
+settings.json
+portable
