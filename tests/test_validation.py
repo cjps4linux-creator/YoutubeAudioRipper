@@ -55,7 +55,8 @@ def test_validate_youtube_url(url, expected_ok):
 
 
 def test_validate_youtube_url_too_long():
-    long_url = "https://www.youtube.com/watch?v=" + "a" * 2000
+    # Valid 11-char ID with a very long query parameter (>2048 chars)
+    long_url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ" + "&" + "x" * 3000
     ok, err = validate_youtube_url(long_url)
     assert ok is False
     assert "too long" in err.lower()
@@ -96,7 +97,7 @@ def test_validate_urls_too_many():
     "title,expected",
     [
         ("Normal Song Title", "Normal Song Title"),
-        ('Song<>:"/\\|?*', "Song"),
+        ('Song<>:"/\|?*', "Song"),
         ("   Multiple   Spaces   ", "Multiple Spaces"),
         ("A" * 100, "A" * 80),  # truncated to 80 chars
         ("", "Unknown_Track"),
@@ -110,7 +111,7 @@ def test_sanitize_filename(title, expected):
 
 
 def test_sanitize_filename_removes_invalid_chars():
-    result = sanitize_filename('test<>:"/\\|?*file')
+    result = sanitize_filename('test<>:"/\|?*file')
     assert "<" not in result
     assert ">" not in result
     assert ":" not in result
@@ -143,8 +144,8 @@ def test_is_already_downloaded_returns_none_for_missing_url():
     assert result is None
 
 
-def test_is_already_downloaded_returns_filename_for_existing(tmp_path):
-    from rip_gui import is_already_downloaded
+def test_is_already_downloaded_returns_filename_for_existing(tmp_path, monkeypatch):
+    import rip_gui
 
     registry = {"https://example.com/video1": "Song One.flac"}
 
@@ -153,29 +154,28 @@ def test_is_already_downloaded_returns_filename_for_existing(tmp_path):
     output_dir.mkdir()
     (output_dir / "Song One.flac").write_text("fake audio", encoding="utf-8")
 
-    # Monkey-patch OUTPUT_DIR for this test
+    # Monkeypatch load_settings to return our temp output dir
+    monkeypatch.setattr(
+        rip_gui,
+        "load_settings",
+        lambda: {"output_dir": str(output_dir)},
+    )
+
+    result = rip_gui.is_already_downloaded("https://example.com/video1", registry)
+    assert result == "Song One.flac"
+
+
+def test_is_already_downloaded_returns_none_when_file_missing(tmp_path, monkeypatch):
     import rip_gui
-
-    original_output_dir = rip_gui.OUTPUT_DIR
-    rip_gui.OUTPUT_DIR = output_dir
-    try:
-        result = is_already_downloaded("https://example.com/video1", registry)
-        assert result == "Song One.flac"
-    finally:
-        rip_gui.OUTPUT_DIR = original_output_dir
-
-
-def test_is_already_downloaded_returns_none_when_file_missing(tmp_path):
-    from rip_gui import is_already_downloaded
 
     registry = {"https://example.com/video1": "Missing.flac"}
 
-    import rip_gui
+    # Point to an empty directory via load_settings
+    monkeypatch.setattr(
+        rip_gui,
+        "load_settings",
+        lambda: {"output_dir": str(tmp_path / "output")},
+    )
 
-    original_output_dir = rip_gui.OUTPUT_DIR
-    rip_gui.OUTPUT_DIR = tmp_path / "output"
-    try:
-        result = is_already_downloaded("https://example.com/video1", registry)
-        assert result is None
-    finally:
-        rip_gui.OUTPUT_DIR = original_output_dir
+    result = rip_gui.is_already_downloaded("https://example.com/video1", registry)
+    assert result is None
